@@ -121,10 +121,8 @@ class RustBPETokenizer:
     def decode(self, ids):
         return self.enc.decode(ids)
 
-    def save(self, tokenizer_dir):
+    def save(self, dir):
         # save the encoding object to disk
-        os.makedirs(tokenizer_dir, exist_ok=True)
-        pickle_path = os.path.join(tokenizer_dir, "tokenizer.pkl")
-        with open(pickle_path, "wb") as f:
+        with open(dir, "wb") as f:
             pickle.dump(self.enc, f)
-        print(f"Saved tokenizer encoding to {pickle_path}")
+        print(f"Saved tokenizer encoding to {dir}")

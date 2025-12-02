@@ -5,6 +5,18 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "datasets>=4.4.1",
+    "maturin>=1.10.2",
     "tiktoken>=0.12.0",
     "torch>=2.9.1",
 ]
+
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+module-name = "rustbpe"
+bindings = "pyo3"
+python-source = "."
+manifest-path = "rustbpe/Cargo.toml"
