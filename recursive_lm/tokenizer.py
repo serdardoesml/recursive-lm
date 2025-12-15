@@ -56,14 +56,13 @@ class RustBPETokenizer:
         return cls(enc, "<|bos|>")
 
     @classmethod
-    def from_directory(cls, tokenizer_dir):
-        pickle_path = os.path.join(tokenizer_dir, "tokenizer.pkl")
-        with open(pickle_path, "rb") as f:
+    def load_from_dir(cls, dir):
+        with open(dir, "rb") as f:
             enc = pickle.load(f)
         return cls(enc, "<|bos|>")
 
     @classmethod
-    def from_pretrained(cls, tiktoken_name):
+    def load_from_pretrained(cls, tiktoken_name): # Loads from existing openai tokenizers
         # https://github.com/openai/tiktoken/blob/eedc8563/tiktoken_ext/openai_public.py
         enc = tiktoken.get_encoding(tiktoken_name)
         # tiktoken calls the special document delimiter token "<|endoftext|>"

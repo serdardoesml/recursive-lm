@@ -41,6 +41,16 @@ def clamp_punctuation_runs(text: str) -> str:
     return LONG_PUNCT_RE.sub(lambda m: m.group(0)[:3], text)
 
 
+def abbreviate_words(n: int) -> str:
+    for factor, suffix in ((1_000_000_000_000, "T"), (1_000_000_000, "b"),
+                           (1_000_000, "M"), (1_000, "k")):
+        if n >= factor:
+            value = n / factor
+            rounded = round(value, 1)
+            return f"{int(rounded)}{suffix}" if rounded.is_integer() else f"{rounded}{suffix}"
+    return str(n)
+
+
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--target-words", type=int, default=100_000_000,
@@ -56,6 +66,7 @@ def main():
     args = parse_args()
 
     target_words_total = int(args.target_words)
+    target_words_total_str = abbreviate_words(target_words_total)
 
     total_rows = sum(CLUSTER_ROWS.values())
     cluster_frac = {cid: CLUSTER_ROWS[cid] / total_rows for cid in CLUSTER_ROWS}
@@ -72,7 +83,7 @@ def main():
     written_per_cluster = {cid: 0 for cid in CLUSTER_ROWS}
 
     base_dir = get_base_dir()
-    filename = f"climbmix{target_words_total}words.txt"
+    filename = f"climbmix{target_words_total_str}words.txt"
 
     with open(os.path.join(base_dir, "data", filename), "w", encoding="utf-8") as fout:
         for cid in sorted(CLUSTER_ROWS):
@@ -102,11 +113,9 @@ def main():
                 if word_count == 0:
                     continue
 
-                # Ensure docs are separated by at least one newline.
-                # Preserve text content otherwise.
-                if not text.endswith("\n"):
-                    text += "\n"
-                fout.write(text)
+                fout.write(text.rstrip("\n"))
+                fout.write("\n")
+                fout.write("<|bos|> ")
 
                 written_total_words += word_count
                 written_per_cluster[cid] += word_count

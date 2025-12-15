@@ -16,7 +16,25 @@ base_dir = get_base_dir()
 # Iterator that yields an entire plain text file (Limited by max chars). Assumes utf-8 encoding.
 def raw_text_iterator():
     with open(os.path.join(base_dir, "data", args.dataset), "r", encoding="utf-8") as f:
-        yield f.read(args.max_chars)
+        total = 0
+        buf = ""
+        for line in f:
+            if total >= args.max_chars:
+                break
+            if total + len(line) > args.max_chars:
+                line = line[: args.max_chars - total]
+            total += len(line)
+
+            # treat a newline + BOS marker as a document boundary
+            if line.startswith("<|bos|> "):
+                if buf:
+                    yield buf
+                buf = line[len("<|bos|> ") :]
+                continue
+
+            buf += line
+        if buf:
+            yield buf
 
 text_iter = raw_text_iterator()
 
