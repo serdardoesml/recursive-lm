@@ -3,21 +3,18 @@ name = "recursive-lm"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "datasets>=4.4.1",
     "maturin>=1.10.2",
     "pyarrow>=22.0.0",
     "tiktoken>=0.12.0",
-    "torch>=2.9.1",
+    "torch>=2.4,<2.5",
 ]
 
 [dependency-groups]
-cpu = [  
-    "torch>=2.8.0",  
-]  
 gpu = [
-  "flash-attn",
+  "flash-attn==2.8.3",
 ]
 
 [build-system]
