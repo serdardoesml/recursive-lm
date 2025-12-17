@@ -7,6 +7,9 @@ FlashAttention expects fp16/bf16 on CUDA for the fast path.
 
 bb24.train has 7,195,269 words
 
+flash_attn_varlen_qkvpacked_func signature
+(qkv, cu_seqlens, max_seqlen, dropout_p=0.0, softmax_scale=None, causal=False, window_size=(-1, -1), softcap=0.0, alibi_slopes=None, deterministic=False, return_attn_probs=False)
+
 # Commands
 
 Build rustbpe with:
