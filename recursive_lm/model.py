@@ -45,6 +45,7 @@ def apply_rotary_emb(x, cos, sin):
 
 class CausalVarlenSelfAttention(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
+        super().__init__()
         # One fused projection for QKV
         self.Wqkv = nn.Linear(config.n_embd, 3 * config.n_embd, bias=False)
         self.Wo   = nn.Linear(config.n_embd, config.n_embd, bias=False)
@@ -138,7 +139,9 @@ class RecursiveGPT(nn.Module):
         # Assert config is correct
         assert config.n_embd % config.n_head == 0
 
-        self.cos_cache, self.sin_cache = RecursiveGPT.build_rope_cache(config.sequence_len, config.n_headdim)
+        cos, sin = RecursiveGPT.build_rope_cache(config.sequence_len, config.n_headdim)
+        self.register_buffer("cos_cache", cos, persistent=False)
+        self.register_buffer("sin_cache", sin, persistent=False)
 
         self.embedding = nn.Embedding(config.vocab_size, config.n_embd)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)

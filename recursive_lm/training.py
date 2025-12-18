@@ -5,7 +5,7 @@ from dataloader import batch_iterator
 
 def train(model_config: ModelConfig, tokens_per_batch, lr, parquet_path, device):
     model = RecursiveGPT(model_config).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=lr)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr) # TODO: Try muon optimizer
 
     for input_ids, targets, cu_seqlens, max_seqlen, position_ids in batch_iterator(
         parquet_path, 
