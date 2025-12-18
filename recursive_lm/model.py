@@ -139,6 +139,7 @@ class RecursiveGPT(nn.Module):
         # Assert config is correct
         assert config.n_embd % config.n_head == 0
 
+        # We build cache then register it as a buffer to ensure it gets moved to device together with the model
         cos, sin = RecursiveGPT.build_rope_cache(config.sequence_len, config.n_headdim)
         self.register_buffer("cos_cache", cos, persistent=False)
         self.register_buffer("sin_cache", sin, persistent=False)
