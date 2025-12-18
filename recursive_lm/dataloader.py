@@ -89,10 +89,10 @@ def pack_batch(segments, device):
     # I have absolutely no idea if doing it this way is any faster than creating the tensor on GPU directly
     # It probably does not matter much, and i spent way too much time on it, so i am leaving it as it is
     use_cuda_optimizations = device == "cuda"
-    input_ids_t = torch.tensor(input_ids, dtype=torch.long, pin_memory=use_cuda_optimizations)
-    targets_t = torch.tensor(targets, dtype=torch.long, pin_memory=use_cuda_optimizations)
-    cu_seqlens_t = torch.tensor(cu, dtype=torch.int32, pin_memory=use_cuda_optimizations)
-    position_ids_t = torch.tensor(position_ids, dtype=torch.int32, pin_memory=use_cuda_optimizations)
+    input_ids_t = torch.tensor(input_ids, dtype=torch.long, pin_memory=use_cuda_optimizations, device="cpu")
+    targets_t = torch.tensor(targets, dtype=torch.long, pin_memory=use_cuda_optimizations, device="cpu")
+    cu_seqlens_t = torch.tensor(cu, dtype=torch.int32, pin_memory=use_cuda_optimizations, device="cpu")
+    position_ids_t = torch.tensor(position_ids, dtype=torch.int32, pin_memory=use_cuda_optimizations, device="cpu")
 
     if device is not None:
         input_ids_t = input_ids_t.to(device, non_blocking=use_cuda_optimizations)
@@ -110,7 +110,7 @@ def batch_iterator(
     max_sl: int = 512,
     token_col: str = "tokens",
     drop_last: bool = True,
-    device=None,
+    device="cpu",
 ):
     """Yield packed (micro)batches with fixed token budget.
 
@@ -154,8 +154,7 @@ if __name__ == "__main__":
         tokens_per_batch=8192,
         max_sl=256,
         token_col="tokens",
-        drop_last=True,
-        device=None,
+        drop_last=True
     ):
         i += 1
         print(input_ids.shape, targets.shape, cu_seqlens.shape, position_ids.shape)
