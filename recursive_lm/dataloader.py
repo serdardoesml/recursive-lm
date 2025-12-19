@@ -63,7 +63,7 @@ def pack_batch(segments, device):
       input_ids    [total_tokens]  (long)
       targets      [total_tokens]  (long)
       cu_seqlens   [B+1]           (int32)
-      position_ids [total_tokens]  (int32, resets each segment)
+      position_ids [total_tokens]  (long, resets each segment)
 
     """
 
@@ -92,7 +92,7 @@ def pack_batch(segments, device):
     input_ids_t = torch.tensor(input_ids, dtype=torch.long, pin_memory=use_cuda_optimizations, device="cpu")
     targets_t = torch.tensor(targets, dtype=torch.long, pin_memory=use_cuda_optimizations, device="cpu")
     cu_seqlens_t = torch.tensor(cu, dtype=torch.int32, pin_memory=use_cuda_optimizations, device="cpu")
-    position_ids_t = torch.tensor(position_ids, dtype=torch.int32, pin_memory=use_cuda_optimizations, device="cpu")
+    position_ids_t = torch.tensor(position_ids, dtype=torch.long, pin_memory=use_cuda_optimizations, device="cpu")
 
     if device is not None:
         input_ids_t = input_ids_t.to(device, non_blocking=use_cuda_optimizations)

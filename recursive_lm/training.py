@@ -26,22 +26,21 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
 
     total_steps = int(
         (train_config.max_tok_count * train_config.epoch)
-        / train_config.microbatch_tok
-        * train_config.grad_acc
+        / (train_config.microbatch_tok * train_config.grad_acc)
     )
     step = 0
     micro_step = 0
     accum_loss = 0.0
     opt.zero_grad(set_to_none=True)
 
-    for input_ids, targets, cu_seqlens, max_seqlen, position_ids in batch_iterator(
+    for input_ids, targets, cu_seqlens, position_ids in batch_iterator(
         parquet_path, 
         tokens_per_batch=train_config.microbatch_tok,
         max_sl=train_config.model_config.sequence_len,
         device=device
     ):
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            logits = model(input_ids, cu_seqlens, max_seqlen, position_ids)
+            logits = model(input_ids, cu_seqlens, position_ids)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
         loss_float = float(loss.detach())

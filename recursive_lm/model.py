@@ -36,7 +36,7 @@ class ModelConfig:
         attn = (self.n_embd * 4 * self.n_embd)
         mlp = (self.n_embd * self.n_embd * self.mlp_mul) * 2
         if self.tie_embed:
-            embed + attn + mlp
+            return embed + attn + mlp
         else:
             return (2 * embed) + attn + mlp
 
@@ -167,11 +167,11 @@ class RecursiveGPT(nn.Module):
             self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.recursive_block = Block(config, self.cos_cache, self.sin_cache)
 
-    def forward(self, input_ids, cu_seqlens, max_seqlen, position_ids):
+    def forward(self, input_ids, cu_seqlens, position_ids):
         # input_ids: [total_tokens] (flattened)
         x = self.embedding(input_ids)  # [total_tokens, n_embd]
         for _ in range(self.config.rec_depth):
-            x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids)
+            x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
         if not self.config.tie_embed:
             return self.lm_head(norm(x)) # [total_tokens, vocab_size]
         else:
