@@ -18,7 +18,7 @@ import random
 import pyarrow.parquet as pq
 import torch
 
-from common import get_base_dir
+from .common import get_base_dir
 
 
 def parquet_doc_segments(parquet_path, token_col="tokens", T=512):

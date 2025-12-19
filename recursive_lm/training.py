@@ -1,8 +1,8 @@
 import torch
 import torch.nn.functional as F
-from model import RecursiveGPT, ModelConfig
-from dataloader import batch_iterator
-from common import get_base_dir
+from .model import RecursiveGPT, ModelConfig
+from .dataloader import batch_iterator
+from .common import get_base_dir
 
 from dataclasses import dataclass
 from datetime import datetime
