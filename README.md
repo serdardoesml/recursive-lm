@@ -1,6 +1,6 @@
 # Random Notes
 
-We shuffle by rowgroups in the dataloader, for climbmix we use a row group size of 32 so with a seq length of around 1 mean doc length and batch size of 256, we sample from 8 random spots per batch.
+We shuffle by rowgroups in the dataloader, for climbmix we use a row group size of 4 so with a batch size of 8192 we sample from around 4 documents.
 
 We use FlashAttention to have variable length fast attention to prevent cross-doc attention.
 FlashAttention expects fp16/bf16 on CUDA for the fast path.

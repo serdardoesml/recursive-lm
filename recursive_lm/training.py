@@ -39,6 +39,9 @@ class TrainingConfig:
     max_tok_count: int = 130300589 # 130.3M default max tok count, 16000 microbatches, 2000 updates per epoch
     epoch: int = 10 # 10 epochs by default
     warmup_steps: int = 0
+    use_wandb: bool = False
+    wandb_project: str = "recursive-lm"
+    wandb_run_name: str | None = None
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
     model = RecursiveGPT(train_config.model_config).to(device)
@@ -59,13 +62,20 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         num_warmup_steps=train_config.warmup_steps,
         num_training_steps=total_steps,
     )
+    wandb_run = None
+    if train_config.use_wandb:
+        import wandb
+        wandb_run = wandb.init(
+            project=train_config.wandb_project,
+            name=train_config.wandb_run_name,
+        )
 
     print(
         "Training summary | "
         f"epochs {train_config.epoch} | "
         f"total_steps {total_steps} | "
         f"lr {train_config.lr:.6g} | "
-        f"distinct params {train_config.model_config.total_param_size:,}"
+        f"distinct params {train_config.model_config.total_param_size:,} | "
         f"unrolled params {train_config.model_config.total_unrolled_param_size:,}"
     )
 
@@ -95,11 +105,26 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 avg_step_time = (now - start_time) / step
                 remaining = avg_step_time * (total_steps - step)
                 lr = scheduler.get_last_lr()[0]
+                tok_per_s = train_config.microbatch_tok / step_time
                 print(
                     f"Epoch {epoch_idx + 1}/{train_config.epoch} "
                     f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
-                    f"lr {lr:.6g} step_time {step_time:.2f}s eta {remaining:.0f}s"
+                    f"lr {lr:.6g} step_time {step_time:.2f}s tok/s {tok_per_s} "
+                    f"eta {remaining:.0f}s "
                 )
+                if wandb_run is not None:
+                    wandb_run.log(
+                        {
+                            "epoch": epoch_idx + 1,
+                            "step": step,
+                            "total_steps": total_steps,
+                            "loss": avg_loss,
+                            "lr": lr,
+                            "step_time_s": step_time,
+                            "tok_per_s": tok_per_s,
+                        },
+                        step=step,
+                    )
                 last_step_time = now
                 if step >= total_steps:
                     break
@@ -110,6 +135,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
 
     if save:
         save_model(model)
+    if wandb_run is not None:
+        wandb_run.finish()
 
 def save_model(model):
     timestamp = datetime.now().strftime("%y%m%d_%H%M%S")

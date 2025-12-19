@@ -56,7 +56,7 @@ for doc in raw_text_iterator():
         table = pa.Table.from_arrays([pa.array(docs), pa.array(lengths)], names=["tokens", "length"])
         if writer is None:
             writer = pq.ParquetWriter(out_path, table.schema)
-        writer.write_table(table, row_group_size=32)
+        writer.write_table(table, row_group_size=4)
         docs.clear()
         lengths.clear()
 
@@ -64,7 +64,7 @@ if docs:
     table = pa.Table.from_arrays([pa.array(docs), pa.array(lengths)], names=["tokens", "length"])
     if writer is None:
         writer = pq.ParquetWriter(out_path, table.schema)
-    writer.write_table(table, row_group_size=32)
+    writer.write_table(table, row_group_size=4)
 
 if writer is not None:
     writer.close()
