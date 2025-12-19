@@ -7,6 +7,7 @@ from common import get_base_dir
 from dataclasses import dataclass
 from datetime import datetime
 import os
+import time
 
 @dataclass
 class TrainingConfig:
@@ -32,6 +33,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     micro_step = 0
     accum_loss = 0.0
     opt.zero_grad(set_to_none=True)
+    start_time = time.time()
+    last_step_time = start_time
 
     for input_ids, targets, cu_seqlens, position_ids in batch_iterator(
         parquet_path, 
@@ -52,7 +55,15 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             opt.step()
             step += 1
             avg_loss = accum_loss / train_config.grad_acc
-            print(f"Step {step}/{total_steps} training loss: {avg_loss:.4f}")
+            now = time.time()
+            step_time = now - last_step_time
+            avg_step_time = (now - start_time) / step
+            remaining = avg_step_time * (total_steps - step)
+            print(
+                f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
+                f"step_time {step_time:.2f}s eta {remaining:.0f}s"
+            )
+            last_step_time = now
             if step >= total_steps:
                 break
             opt.zero_grad(set_to_none=True)
