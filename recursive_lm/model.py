@@ -39,6 +39,16 @@ class ModelConfig:
             return embed + attn + mlp
         else:
             return (2 * embed) + attn + mlp
+        
+    @property
+    def total_unrolled_param_size(self) -> int:
+        embed = self.vocab_size * self.n_embd
+        attn = (self.n_embd * 4 * self.n_embd)
+        mlp = (self.n_embd * self.n_embd * self.mlp_mul) * 2
+        if self.tie_embed:
+            return embed + ((attn + mlp) * self.rec_depth)
+        else:
+            return (2 * embed) + ((attn + mlp) * self.rec_depth)
 
 def norm(x):
     # x: [..., n_embd], purely functional rmsnorm with no learnable params

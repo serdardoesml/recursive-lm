@@ -13,6 +13,7 @@ parser.add_argument("--microbatch_tok", type=int, default=TrainingConfig.microba
 parser.add_argument("--grad_acc", type=int, default=TrainingConfig.grad_acc)
 parser.add_argument("--max_tok_count", type=int, default=TrainingConfig.max_tok_count)
 parser.add_argument("--epoch", type=int, default=TrainingConfig.epoch)
+parser.add_argument("--warmup_steps", type=int, default=TrainingConfig.warmup_steps)
 
 parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
 parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
@@ -44,6 +45,7 @@ train_config = TrainingConfig(
     grad_acc=args.grad_acc,
     max_tok_count=args.max_tok_count,
     epoch=args.epoch,
+    warmup_steps=args.warmup_steps,
 )
 
 parquet_path = os.path.join(get_base_dir(), "data", "tokenized", args.dataset)
