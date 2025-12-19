@@ -25,4 +25,4 @@ Tokenize data with:
 python -m scripts.tokenize_data --dataset climbmix100Mwords.txt --tokenizer climbmix100Mwords_tokenizer.pkl
 
 Train model with:
-python -m scripts.train_model --dataset_filename climbmix100Mwords.parquet
+python -m scripts.train_model --dataset climbmix100Mwords.parquet

@@ -70,8 +70,9 @@ class CausalVarlenSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
-        self.cos_cache = cos_cache
-        self.sin_cache = sin_cache
+        # We register it as a buffer to ensure it gets moved to device together with the model
+        self.register_buffer("cos_cache", cos_cache, persistent=False)
+        self.register_buffer("sin_cache", sin_cache, persistent=False)
     
     def forward(self, x, cu_seqlens, max_seqlen, position_ids):
         """
@@ -157,15 +158,13 @@ class RecursiveGPT(nn.Module):
         # Assert config is correct
         assert config.n_embd % config.n_head == 0
 
-        # We build cache then register it as a buffer to ensure it gets moved to device together with the model
-        cos, sin = RecursiveGPT.build_rope_cache(config.sequence_len, config.n_headdim)
-        self.register_buffer("cos_cache", cos, persistent=False)
-        self.register_buffer("sin_cache", sin, persistent=False)
+        # We build cache then register it as a buffer later to ensure it gets moved to device together with the model
+        cos_cache, sin_cache = RecursiveGPT.build_rope_cache(config.sequence_len, config.n_headdim)
 
         self.embedding = nn.Embedding(config.vocab_size, config.n_embd)
         if not self.config.tie_embed:
             self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.recursive_block = Block(config, self.cos_cache, self.sin_cache)
+        self.recursive_block = Block(config, cos_cache, sin_cache)
 
     def forward(self, input_ids, cu_seqlens, position_ids):
         # input_ids: [total_tokens] (flattened)
