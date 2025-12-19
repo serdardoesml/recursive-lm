@@ -6,7 +6,7 @@ from recursive_lm.model import ModelConfig
 from recursive_lm.training import TrainingConfig, train
 
 parser = argparse.ArgumentParser(description="Train RecursiveGPT")
-parser.add_argument("--file_name", type=str, required=True, help="Tokenized parquet filename under data/tokenized")
+parser.add_argument("--dataset_filename", type=str, required=True, help="Tokenized parquet filename under data/tokenized")
 
 parser.add_argument("--lr", type=float, default=TrainingConfig.lr)
 parser.add_argument("--microbatch_tok", type=int, default=TrainingConfig.microbatch_tok)
