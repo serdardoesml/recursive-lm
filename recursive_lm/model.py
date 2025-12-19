@@ -18,9 +18,27 @@ class ModelConfig:
     mlp_mul: int = 8
     rec_depth: int = 4
 
+    tie_embed: bool = True
+
+    # Default param count
+    # Embed: 32768 x 1024 = 33.554.432
+    # Attn: 1024^2 x 3 = 4.194.304
+    # Mlp: 1024^2 x 8 x 2 = 16.777.216
+    # Total: 33.554.432 Embed, 20.971.520 Non-Embed, 54.525.952 total
+
     @property
     def n_headdim(self) -> int:
         return self.n_embd // self.n_head
+
+    @property
+    def total_param_size(self) -> int:
+        embed = self.vocab_size * self.n_embd
+        attn = (self.n_embd * 4 * self.n_embd)
+        mlp = (self.n_embd * self.n_embd * self.mlp_mul) * 2
+        if self.tie_embed:
+            embed + attn + mlp
+        else:
+            return (2 * embed) + attn + mlp
 
 def norm(x):
     # x: [..., n_embd], purely functional rmsnorm with no learnable params
@@ -145,7 +163,8 @@ class RecursiveGPT(nn.Module):
         self.register_buffer("sin_cache", sin, persistent=False)
 
         self.embedding = nn.Embedding(config.vocab_size, config.n_embd)
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        if not self.config.tie_embed:
+            self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.recursive_block = Block(config, self.cos_cache, self.sin_cache)
 
     def forward(self, input_ids, cu_seqlens, max_seqlen, position_ids):
@@ -153,6 +172,8 @@ class RecursiveGPT(nn.Module):
         x = self.embedding(input_ids)  # [total_tokens, n_embd]
         for _ in range(self.config.rec_depth):
             x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids)
-        return self.lm_head(norm(x))   # [total_tokens, vocab_size]
-
+        if not self.config.tie_embed:
+            return self.lm_head(norm(x)) # [total_tokens, vocab_size]
+        else:
+            return F.linear(norm(x), self.embedding.weight) # [total_tokens, vocab_size]
 
