@@ -4,11 +4,14 @@ import argparse
 import os
 
 import torch
+import torch.nn.functional as F
 
 import json
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
+
+import matplotlib.pyplot as plt
 
 from recursive_lm.common import get_base_dir
 from recursive_lm.model import ModelConfig, RecursiveGPT
@@ -72,8 +75,16 @@ def main():
         x_out_rms: float
         delta_rms: float
         delta_over_in: float
+        # Last-token directional metrics
+        cos_x_delta_last: Optional[float] = None
+        cos_delta_prev_last: Optional[float] = None
+        # Raw module output RMS (pre-RMSNorm in your block)
         attn_out_rms: Optional[float] = None
         mlp_out_rms: Optional[float] = None
+        # Logit dynamics for the last token (using model readout on x_out)
+        top1_id: Optional[int] = None
+        top1_logit: Optional[float] = None
+        logit_l2_from_prev: Optional[float] = None
 
     class ForwardAnalyzer:
         """Collect per-recursion-step metrics via forward hooks.
@@ -92,7 +103,34 @@ def main():
             self._step_idx = 0
             self._pending_attn: Optional[float] = None
             self._pending_mlp: Optional[float] = None
+            self._prev_delta_last: Optional[torch.Tensor] = None
+            self._prev_logits_last: Optional[torch.Tensor] = None
             self.steps: list[StepMetrics] = []
+        @staticmethod
+        def _rmsnorm_vec(v: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
+            # v is 1D [d]
+            denom = (v.float().pow(2).mean() + eps).sqrt()
+            return v.float() / denom
+
+        @staticmethod
+        def _cos(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-12) -> float:
+            a = a.float().flatten()
+            b = b.float().flatten()
+            na = torch.linalg.norm(a)
+            nb = torch.linalg.norm(b)
+            if float(na.item()) < eps or float(nb.item()) < eps:
+                return float("nan")
+            return float((a @ b).item() / (na.item() * nb.item() + eps))
+
+        def _readout_last_logits(self, x_last: torch.Tensor) -> torch.Tensor:
+            # x_last: [d]
+            x_n = self._rmsnorm_vec(x_last)
+            if getattr(self.model.config, "tie_embed", False):
+                W = self.model.embedding.weight
+            else:
+                W = self.model.lm_head.weight
+            # Return logits [V] in float32
+            return F.linear(x_n, W).float()
 
         def close(self):
             for h in self.handles:
@@ -123,10 +161,33 @@ def main():
             # Block forward signature is (x, cu_seqlens, position_ids, max_seqlen)
             x_in = inp[0]
             x_out = out
+
             x_in_rms = self._rms(x_in)
             x_out_rms = self._rms(x_out)
-            delta_rms = self._rms(x_out - x_in)
+
+            delta = (x_out - x_in)
+            delta_rms = self._rms(delta)
             delta_over_in = float(delta_rms / (x_in_rms + 1e-12))
+
+            # Directional metrics on the last token only (keeps memory/compute small)
+            x_in_last = x_in[-1]
+            delta_last = delta[-1]
+            cos_x_delta_last = self._cos(x_in_last, delta_last)
+
+            cos_delta_prev_last = None
+            if self._prev_delta_last is not None:
+                cos_delta_prev_last = self._cos(self._prev_delta_last, delta_last)
+
+            # Logit dynamics for last token: top-1 and drift from previous step
+            logits_last = self._readout_last_logits(x_out[-1])
+            top1_id = int(torch.argmax(logits_last).item())
+            top1_logit = float(logits_last[top1_id].item())
+
+            logit_l2_from_prev = None
+            if self._prev_logits_last is not None:
+                # RMS L2 drift of logits (normalized by sqrt(V) for scale stability)
+                diff = (logits_last - self._prev_logits_last)
+                logit_l2_from_prev = float(torch.linalg.norm(diff).item() / (diff.numel() ** 0.5 + 1e-12))
 
             self.steps.append(
                 StepMetrics(
@@ -135,13 +196,20 @@ def main():
                     x_out_rms=x_out_rms,
                     delta_rms=delta_rms,
                     delta_over_in=delta_over_in,
+                    cos_x_delta_last=float(cos_x_delta_last),
+                    cos_delta_prev_last=(float(cos_delta_prev_last) if cos_delta_prev_last is not None else None),
                     attn_out_rms=self._pending_attn,
                     mlp_out_rms=self._pending_mlp,
+                    top1_id=top1_id,
+                    top1_logit=top1_logit,
+                    logit_l2_from_prev=logit_l2_from_prev,
                 )
             )
 
             self._pending_attn = None
             self._pending_mlp = None
+            self._prev_delta_last = delta_last.detach()
+            self._prev_logits_last = logits_last.detach()
             self._step_idx += 1
 
         def enable(self):
@@ -184,7 +252,6 @@ def main():
             model_stem = os.path.splitext(os.path.basename(args.model))[0]
             out_stem = args.analysis_out or f"prompt_analysis_{model_stem}_{ts}"
             out_json_path = os.path.join(base_analysis_dir, f"{out_stem}.json")
-            out_txt_path = os.path.join(base_analysis_dir, f"{out_stem}.txt")
 
             next_piece = None
             try:
@@ -210,30 +277,115 @@ def main():
             with open(out_json_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
 
-            # Human-readable summary
-            lines = []
-            lines.append(f"model: {args.model}")
-            lines.append(f"tokenizer: {args.tokenizer}")
-            lines.append(f"prompt_token_count: {len(tokens)} (ctx {len(ctx)})")
-            lines.append(f"next_id: {next_id} next_piece: {repr(next_piece)}")
-            lines.append("")
-            lines.append("Per-step metrics (RMS norms; delta is x_out - x_in):")
-            lines.append("step\tx_in_rms\tx_out_rms\tdelta_rms\tdelta/x_in\tattn_out_rms\tmlp_out_rms")
-            for s in analyzer.steps:
-                lines.append(
-                    f"{s.step}\t{s.x_in_rms:.6f}\t{s.x_out_rms:.6f}\t{s.delta_rms:.6f}\t{s.delta_over_in:.6f}\t"
-                    f"{(s.attn_out_rms if s.attn_out_rms is not None else float('nan')):.6f}\t"
-                    f"{(s.mlp_out_rms if s.mlp_out_rms is not None else float('nan')):.6f}"
-                )
+            # --- Plot metrics (save only; no textual report) ---
+            steps = [s.step for s in analyzer.steps]
+            x_in = [s.x_in_rms for s in analyzer.steps]
+            x_out = [s.x_out_rms for s in analyzer.steps]
+            delta = [s.delta_rms for s in analyzer.steps]
+            delta_ratio = [s.delta_over_in for s in analyzer.steps]
+            attn_rms = [s.attn_out_rms if s.attn_out_rms is not None else float("nan") for s in analyzer.steps]
+            mlp_rms = [s.mlp_out_rms if s.mlp_out_rms is not None else float("nan") for s in analyzer.steps]
+            cos_xd = [s.cos_x_delta_last if s.cos_x_delta_last is not None else float("nan") for s in analyzer.steps]
+            cos_dd = [s.cos_delta_prev_last if s.cos_delta_prev_last is not None else float("nan") for s in analyzer.steps]
+            top1_id = [s.top1_id if s.top1_id is not None else -1 for s in analyzer.steps]
+            top1_logit = [s.top1_logit if s.top1_logit is not None else float("nan") for s in analyzer.steps]
+            logit_drift = [s.logit_l2_from_prev if s.logit_l2_from_prev is not None else float("nan") for s in analyzer.steps]
 
-            with open(out_txt_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
+            # Figure 1: norms and relative update
+            fig1, ax1 = plt.subplots(figsize=(10, 4))
+            ax1.plot(steps, x_in, label="x_in_rms")
+            ax1.plot(steps, x_out, label="x_out_rms")
+            ax1.plot(steps, delta, label="delta_rms")
+            ax1.set_title("Recursive block trajectory norms")
+            ax1.set_xlabel("recursion step")
+            ax1.set_ylabel("RMS")
+            ax1.legend()
+            fig1.tight_layout()
+            p1 = os.path.join(base_analysis_dir, f"{out_stem}_norms.png")
+            fig1.savefig(p1, dpi=150)
+            plt.close(fig1)
 
-            print("\n".join(lines[:8]))
-            print(f"Saved analysis JSON to {out_json_path}")
-            print(f"Saved analysis TXT  to {out_txt_path}")
-            print("\nCompletion:")
-            print(tokenizer.decode(tokens_plus))
+            fig2, ax2 = plt.subplots(figsize=(10, 4))
+            ax2.plot(steps, delta_ratio, label="delta/x_in")
+            ax2.set_title("Relative update size (delta/x_in)")
+            ax2.set_xlabel("recursion step")
+            ax2.set_ylabel("ratio")
+            ax2.legend()
+            fig2.tight_layout()
+            p2 = os.path.join(base_analysis_dir, f"{out_stem}_delta_ratio.png")
+            fig2.savefig(p2, dpi=150)
+            plt.close(fig2)
+
+            # Figure 2: module raw RMS (pre-RMSNorm outputs)
+            fig3, ax3 = plt.subplots(figsize=(10, 4))
+            ax3.plot(steps, attn_rms, label="attn_out_rms (raw)")
+            ax3.plot(steps, mlp_rms, label="mlp_out_rms (raw)")
+            ax3.set_title("Module output RMS (raw; before RMSNorm)")
+            ax3.set_xlabel("recursion step")
+            ax3.set_ylabel("RMS")
+            ax3.legend()
+            fig3.tight_layout()
+            p3 = os.path.join(base_analysis_dir, f"{out_stem}_module_rms.png")
+            fig3.savefig(p3, dpi=150)
+            plt.close(fig3)
+
+            # Figure 3: directional metrics on last token
+            fig4, ax4 = plt.subplots(figsize=(10, 4))
+            ax4.plot(steps, cos_xd, label="cos(x, delta) last")
+            ax4.plot(steps, cos_dd, label="cos(delta, prev_delta) last")
+            ax4.set_title("Directional metrics (last token)")
+            ax4.set_xlabel("recursion step")
+            ax4.set_ylabel("cosine")
+            ax4.legend()
+            fig4.tight_layout()
+            p4 = os.path.join(base_analysis_dir, f"{out_stem}_cosines.png")
+            fig4.savefig(p4, dpi=150)
+            plt.close(fig4)
+
+            # Figure 4: logit dynamics for last token
+            fig5, ax5 = plt.subplots(figsize=(10, 4))
+            ax5.plot(steps, logit_drift, label="logit drift (RMS L2) from prev")
+            ax5.set_title("Last-token logit drift across recursion")
+            ax5.set_xlabel("recursion step")
+            ax5.set_ylabel("RMS L2 drift")
+            ax5.legend()
+            fig5.tight_layout()
+            p5 = os.path.join(base_analysis_dir, f"{out_stem}_logit_drift.png")
+            fig5.savefig(p5, dpi=150)
+            plt.close(fig5)
+
+            fig6, ax6 = plt.subplots(figsize=(10, 4))
+            ax6.plot(steps, top1_logit, label="top-1 logit")
+            ax6.set_title("Last-token top-1 logit across recursion")
+            ax6.set_xlabel("recursion step")
+            ax6.set_ylabel("logit")
+            ax6.legend()
+            fig6.tight_layout()
+            p6 = os.path.join(base_analysis_dir, f"{out_stem}_top1_logit.png")
+            fig6.savefig(p6, dpi=150)
+            plt.close(fig6)
+
+            fig7, ax7 = plt.subplots(figsize=(10, 4))
+            ax7.plot(steps, top1_id, label="top-1 token id")
+            ax7.set_title("Last-token argmax id across recursion")
+            ax7.set_xlabel("recursion step")
+            ax7.set_ylabel("token id")
+            ax7.legend()
+            fig7.tight_layout()
+            p7 = os.path.join(base_analysis_dir, f"{out_stem}_top1_id.png")
+            fig7.savefig(p7, dpi=150)
+            plt.close(fig7)
+
+            # Save a minimal manifest so you can find outputs quickly
+            manifest = {
+                "json": out_json_path,
+                "plots": [p1, p2, p3, p4, p5, p6, p7],
+                "out_stem": out_stem,
+            }
+            manifest_path = os.path.join(base_analysis_dir, f"{out_stem}_manifest.json")
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2)
+
             return
 
         # Normal generation mode (unchanged behavior)
