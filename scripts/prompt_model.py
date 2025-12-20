@@ -16,6 +16,9 @@ def main():
     parser.add_argument("--tokenizer", type=str, required=True, help="Tokenizer filename under tokenizers/")
     parser.add_argument("--gen_tok_count", type=int, default=64, help="Number of tokens to generate")
     parser.add_argument("--prompt", type=str, default=None, help="Prompt text")
+    parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
+    parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
+    parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
     args = parser.parse_args()
 
     base_dir = get_base_dir()
@@ -23,9 +26,21 @@ def main():
     tokenizer_path = os.path.join(base_dir, "tokenizers", args.tokenizer)
 
     tokenizer = RustBPETokenizer.load_from_dir(tokenizer_path)
-    config = ModelConfig(vocab_size=tokenizer.get_vocab_size())
+    state = torch.load(model_path, map_location="cpu", weights_only=True)
+    tie_embed = "lm_head.weight" not in state
+    embed_w = state["embedding.weight"]
+    vocab_size, n_embd = embed_w.shape
+    mlp_mul = state["recursive_block.mlp.c_fc.weight"].shape[0] // n_embd
+    config = ModelConfig(
+        sequence_len=args.sequence_len,
+        vocab_size=vocab_size,
+        n_head=args.n_head,
+        n_embd=n_embd,
+        mlp_mul=mlp_mul,
+        rec_depth=args.rec_depth,
+        tie_embed=tie_embed,
+    )
     model = RecursiveGPT(config)
-    state = torch.load(model_path, map_location="cpu")
     device = "cuda" # Cuda is required due to flash-attn
     model.load_state_dict(state)
     model.to(device)
