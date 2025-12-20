@@ -12,7 +12,6 @@ from dataclasses import dataclass
 class ModelConfig:
     sequence_len: int = 256
     vocab_size: int = 32768
-    n_layer: int = 4
     n_head: int = 16 # number of attention heads
     n_embd: int = 1024
     mlp_mul: int = 8

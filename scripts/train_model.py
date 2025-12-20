@@ -20,7 +20,6 @@ parser.add_argument("--wandb_run_name", type=str, default="")
 
 parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
 parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
-parser.add_argument("--n_layer", type=int, default=ModelConfig.n_layer)
 parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
 parser.add_argument("--n_embd", type=int, default=ModelConfig.n_embd)
 parser.add_argument("--mlp_mul", type=int, default=ModelConfig.mlp_mul)
@@ -33,7 +32,6 @@ args = parser.parse_args()
 model_config = ModelConfig(
     sequence_len=args.sequence_len,
     vocab_size=args.vocab_size,
-    n_layer=args.n_layer,
     n_head=args.n_head,
     n_embd=args.n_embd,
     mlp_mul=args.mlp_mul,
