@@ -183,4 +183,5 @@ def save_model(model, run_name: str | None):
         timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
         filename = f"model_{timestamp}.pth"
     path = os.path.join(get_base_dir(), "models", filename)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(model.state_dict(), path)
