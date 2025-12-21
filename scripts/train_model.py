@@ -17,7 +17,7 @@ parser.add_argument("--epoch", type=int, default=TrainingConfig.epoch)
 parser.add_argument("--warmup_steps", type=int, default=TrainingConfig.warmup_steps)
 parser.add_argument("--wandb", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--wandb_project", type=str, default=TrainingConfig.wandb_project)
-parser.add_argument("--wandb_run_name", type=str, default="")
+parser.add_argument("--run_name", type=str, default="")
 
 parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
 parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
@@ -53,7 +53,7 @@ train_config = TrainingConfig(
     warmup_steps=args.warmup_steps,
     use_wandb=args.wandb == "true",
     wandb_project=args.wandb_project,
-    wandb_run_name=args.wandb_run_name or None,
+    run_name=args.run_name or None,
 )
 
 parquet_path = os.path.join(get_base_dir(), "data", "tokenized", args.dataset)

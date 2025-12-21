@@ -60,7 +60,7 @@ class TrainingConfig:
     warmup_steps: int = 0
     use_wandb: bool = False
     wandb_project: str = "recursive-lm"
-    wandb_run_name: str | None = None
+    run_name: str | None = None
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
     model = RecursiveGPT(train_config.model_config).to(device)
@@ -98,7 +98,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         import wandb
         wandb_run = wandb.init(
             project=train_config.wandb_project,
-            name=train_config.wandb_run_name,
+            name=train_config.run_name,
         )
 
     print(
@@ -168,11 +168,15 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             break
 
     if save:
-        save_model(model)
+        save_model(model, train_config.run_name)
     if wandb_run is not None:
         wandb_run.finish()
 
-def save_model(model):
-    timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
-    path = os.path.join(get_base_dir(), "models", f"model_{timestamp}.pth")
+def save_model(model, run_name: str | None):
+    if run_name:
+        filename = f"{run_name}.pth"
+    else:
+        timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+        filename = f"model_{timestamp}.pth"
+    path = os.path.join(get_base_dir(), "models", filename)
     torch.save(model.state_dict(), path)
