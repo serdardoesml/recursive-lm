@@ -47,17 +47,33 @@ def main():
     tokenizer = RustBPETokenizer.load_from_dir(tokenizer_path)
     state = torch.load(model_path, map_location="cpu", weights_only=True)
     tie_embed = "lm_head.weight" not in state
+    standard_gpt = any(k.startswith("blocks.") for k in state.keys())
+    inferred_rec_depth = args.rec_depth
+    if standard_gpt:
+        block_indices = []
+        for key in state.keys():
+            if key.startswith("blocks."):
+                parts = key.split(".")
+                if len(parts) > 1 and parts[1].isdigit():
+                    block_indices.append(int(parts[1]))
+        if block_indices:
+            inferred_rec_depth = max(block_indices) + 1
     embed_w = state["embedding.weight"]
     vocab_size, n_embd = embed_w.shape
-    mlp_mul = state["recursive_block.mlp.c_fc.weight"].shape[0] // n_embd
+    if standard_gpt:
+        mlp_key = "blocks.0.mlp.c_fc.weight"
+    else:
+        mlp_key = "recursive_block.mlp.c_fc.weight"
+    mlp_mul = state[mlp_key].shape[0] // n_embd
     config = ModelConfig(
         sequence_len=args.sequence_len,
         vocab_size=vocab_size,
         n_head=args.n_head,
         n_embd=n_embd,
         mlp_mul=mlp_mul,
-        rec_depth=args.rec_depth,
+        rec_depth=inferred_rec_depth,
         tie_embed=tie_embed,
+        standard_gpt=standard_gpt,
     )
     model = RecursiveGPT(config)
     device = "cuda" # Cuda is required due to flash-attn
