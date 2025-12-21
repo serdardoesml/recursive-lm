@@ -18,6 +18,8 @@ parser.add_argument("--warmup_steps", type=int, default=TrainingConfig.warmup_st
 parser.add_argument("--wandb", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--wandb_project", type=str, default=TrainingConfig.wandb_project)
 parser.add_argument("--run_name", type=str, default="")
+parser.add_argument("--grad_clip", type=str, choices=["true", "false"], default="true")
+parser.add_argument("--max_grad_norm", type=float, default=TrainingConfig.max_grad_norm)
 
 parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
 parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
@@ -54,6 +56,8 @@ train_config = TrainingConfig(
     use_wandb=args.wandb == "true",
     wandb_project=args.wandb_project,
     run_name=args.run_name or None,
+    grad_clip=args.grad_clip == "true",
+    max_grad_norm=args.max_grad_norm,
 )
 
 parquet_path = os.path.join(get_base_dir(), "data", "tokenized", args.dataset)

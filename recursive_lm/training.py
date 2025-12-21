@@ -61,6 +61,8 @@ class TrainingConfig:
     use_wandb: bool = False
     wandb_project: str = "recursive-lm"
     run_name: str | None = None
+    grad_clip: bool = True
+    max_grad_norm: float = 1.0
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
     model = RecursiveGPT(train_config.model_config).to(device)
@@ -128,6 +130,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             micro_step += 1
 
             if micro_step % train_config.grad_acc == 0:
+                if train_config.grad_clip:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.max_grad_norm)
                 opt.step()
                 scheduler.step()
                 step += 1
