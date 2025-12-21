@@ -69,6 +69,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     embed_params = list(model.embedding.parameters())
     if hasattr(model, "lm_head"):
         embed_params += list(model.lm_head.parameters())
+    if hasattr(model, "rec_layer_embedding"):
+        embed_params += list(model.rec_layer_embedding.parameters())
     if train_config.model_config.standard_gpt:
         block_params = list(model.blocks.parameters())
     else:

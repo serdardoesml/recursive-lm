@@ -183,6 +183,11 @@ class RecursiveGPT(nn.Module):
         else:
             self.recursive_block = Block(config, cos_cache, sin_cache)
 
+            # Layer embeddings (https://arxiv.org/pdf/2502.13181)
+            # Note: Our layer embeddings are simpler than RingFormers, but the idea came from there.
+            self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_embd)
+            nn.init.zeros_(self.rec_layer_embedding.weight)
+
     def forward(self, input_ids, cu_seqlens, position_ids):
         # input_ids: [total_tokens] (flattened)
         x = self.embedding(input_ids)  # [total_tokens, n_embd]
@@ -190,10 +195,10 @@ class RecursiveGPT(nn.Module):
             for i in range(self.config.rec_depth):
                 x = self.blocks[i](x, cu_seqlens, self.config.sequence_len, position_ids)
         else:
-            for _ in range(self.config.rec_depth):
+            for i in range(self.config.rec_depth):
+                x = x + self.rec_layer_embedding.weight[i]
                 x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
         if not self.config.tie_embed:
             return self.lm_head(norm(x)) # [total_tokens, vocab_size]
         else:
             return F.linear(norm(x), self.embedding.weight) # [total_tokens, vocab_size]
-
