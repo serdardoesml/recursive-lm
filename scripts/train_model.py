@@ -25,6 +25,7 @@ parser.add_argument("--n_embd", type=int, default=ModelConfig.n_embd)
 parser.add_argument("--mlp_mul", type=int, default=ModelConfig.mlp_mul)
 parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
 parser.add_argument("--tie_embed", type=str, choices=["true", "false"], default="true")
+parser.add_argument("--standard_gpt", type=str, choices=["true", "false"], default="false") # For experiments
 parser.add_argument("--save", type=str, choices=["true", "false"], default="true")
 
 args = parser.parse_args()
@@ -37,6 +38,7 @@ model_config = ModelConfig(
     mlp_mul=args.mlp_mul,
     rec_depth=args.rec_depth,
     tie_embed=args.tie_embed == "true",
+    standard_gpt=args.standard_gpt == "true",
 )
 
 train_config = TrainingConfig(

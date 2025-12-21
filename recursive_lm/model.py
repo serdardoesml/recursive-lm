@@ -16,8 +16,10 @@ class ModelConfig:
     n_embd: int = 1024
     mlp_mul: int = 8
     rec_depth: int = 4
-
     tie_embed: bool = True
+
+    # Standard gpt experimental mode to compare with non-recursive models
+    standard_gpt: bool = False
 
     # Default param count
     # Embed: 32768 x 1024 = 33.554.432
@@ -31,6 +33,8 @@ class ModelConfig:
 
     @property
     def total_param_size(self) -> int:
+        if self.standard_gpt:
+            return self.total_unrolled_param_size
         embed = self.vocab_size * self.n_embd
         attn = (self.n_embd * 4 * self.n_embd)
         mlp = (self.n_embd * self.n_embd * self.mlp_mul) * 2
@@ -145,7 +149,7 @@ class Block(nn.Module):
 
 class RecursiveGPT(nn.Module):
     @staticmethod
-    def build_rope_cache(max_seqlen, head_dim, device=None):
+    def build_rope_cache(max_seqlen, head_dim, device=None): 
         """
         Build RoPE cache.
 
@@ -173,13 +177,21 @@ class RecursiveGPT(nn.Module):
         self.embedding = nn.Embedding(config.vocab_size, config.n_embd)
         if not self.config.tie_embed:
             self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.recursive_block = Block(config, cos_cache, sin_cache)
+        
+        if config.standard_gpt:
+            self.blocks = nn.ModuleList([Block(config, cos_cache, sin_cache) for _ in range(config.rec_depth)])
+        else:
+            self.recursive_block = Block(config, cos_cache, sin_cache)
 
     def forward(self, input_ids, cu_seqlens, position_ids):
         # input_ids: [total_tokens] (flattened)
         x = self.embedding(input_ids)  # [total_tokens, n_embd]
-        for _ in range(self.config.rec_depth):
-            x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
+        if self.config.standard_gpt:
+            for i in range(self.config.rec_depth):
+                x = self.blocks[i](x, cu_seqlens, self.config.sequence_len, position_ids)
+        else:
+            for _ in range(self.config.rec_depth):
+                x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
         if not self.config.tie_embed:
             return self.lm_head(norm(x)) # [total_tokens, vocab_size]
         else:
