@@ -48,7 +48,8 @@ def get_linear_schedule_with_warmup(
 @dataclass
 class TrainingConfig:
     model_config: ModelConfig
-    lr: float = 7e-3
+    lr_embed: float = 7e-3
+    lr_block: float = 7e-3
 
     # Default target batch size: 65536 tok
     microbatch_tok: int = 32768
@@ -63,7 +64,19 @@ class TrainingConfig:
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
     model = RecursiveGPT(train_config.model_config).to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=train_config.lr) # TODO: Try muon optimizer
+    embed_params = list(model.embedding.parameters())
+    if hasattr(model, "lm_head"):
+        embed_params += list(model.lm_head.parameters())
+    if train_config.model_config.standard_gpt:
+        block_params = list(model.blocks.parameters())
+    else:
+        block_params = list(model.recursive_block.parameters())
+    opt = torch.optim.AdamW(
+        [
+            {"params": embed_params, "lr": train_config.lr_embed},
+            {"params": block_params, "lr": train_config.lr_block},
+        ]
+    ) # TODO: Try muon optimizer
 
     total_steps = int(
         (train_config.max_tok_count * train_config.epoch)
@@ -92,7 +105,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         "Training summary | "
         f"epochs {train_config.epoch} | "
         f"total_steps {total_steps} | "
-        f"lr {train_config.lr:.6g} | "
+        f"lr_embed {train_config.lr_embed:.6g} | "
+        f"lr_block {train_config.lr_block:.6g} | "
         f"distinct params {train_config.model_config.total_param_size:,} | "
         f"unrolled params {train_config.model_config.total_unrolled_param_size:,}"
     )
@@ -122,12 +136,13 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 step_time = now - last_step_time
                 avg_step_time = (now - start_time) / step
                 remaining = avg_step_time * (total_steps - step)
-                lr = scheduler.get_last_lr()[0]
+                lr_embed, lr_block = scheduler.get_last_lr()
                 tok_per_s = train_config.microbatch_tok / step_time
                 print(
                     f"Epoch {epoch_idx + 1}/{train_config.epoch} "
                     f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
-                    f"lr {lr:.6g} step_time {step_time:.2f}s tok/s {tok_per_s} "
+                    f"lr_embed {lr_embed:.6g} lr_block {lr_block:.6g} "
+                    f"step_time {step_time:.2f}s tok/s {tok_per_s} "
                     f"eta {remaining:.0f}s "
                 )
                 if wandb_run is not None:
@@ -137,7 +152,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                             "step": step,
                             "total_steps": total_steps,
                             "loss": avg_loss,
-                            "lr": lr,
+                            "lr_embed": lr_embed,
+                            "lr_block": lr_block,
                             "step_time_s": step_time,
                             "tok_per_s": tok_per_s,
                         },
