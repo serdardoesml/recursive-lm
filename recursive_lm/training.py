@@ -78,8 +78,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         block_params = list(model.recursive_block.parameters())
     opt = MuonWithAuxAdam(
         [
-            {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False},
-            {"params": block_params, "lr": train_config.lr_block, "use_muon": True},
+            {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": 0.005},
+            {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": 1.2},
         ]
     ) # Muon Optimizer (https://arxiv.org/pdf/2502.16982, https://kellerjordan.github.io/posts/muon/)
 
