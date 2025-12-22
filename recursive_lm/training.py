@@ -49,8 +49,8 @@ def get_linear_schedule_with_warmup(
 @dataclass
 class TrainingConfig:
     model_config: ModelConfig
-    lr_embed: float = 3e-4
-    lr_block: float = 0.02 # Muon
+    lr_embed: float = 0.008
+    lr_block: float = 0.023 # Muon
 
     # Default target batch size: 65536 tok
     microbatch_tok: int = 32768
@@ -149,7 +149,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                     f"Epoch {epoch_idx + 1}/{train_config.epoch} "
                     f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
                     f"lr_embed {lr_embed:.6g} lr_block {lr_block:.6g} "
-                    f"step_time {step_time:.2f}s tok/s {tok_per_s} "
+                    f"step_time {step_time:.2f}s tok/s {tok_per_s:.0f} "
                     f"eta {remaining:.0f}s "
                 )
                 if wandb_run is not None:
