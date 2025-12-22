@@ -35,7 +35,6 @@ def main():
         default=None,
         help="Optional output stem (no extension) under analysis/; defaults to auto timestamped name",
     )
-    parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
     parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
     parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
     args = parser.parse_args()
@@ -48,7 +47,6 @@ def main():
     state = torch.load(model_path, map_location="cpu", weights_only=True)
     tie_embed = "lm_head.weight" not in state
     standard_gpt = any(k.startswith("blocks.") for k in state.keys())
-    inferred_rec_depth = args.rec_depth
     if standard_gpt:
         block_indices = []
         for key in state.keys():
@@ -58,6 +56,12 @@ def main():
                     block_indices.append(int(parts[1]))
         if block_indices:
             inferred_rec_depth = max(block_indices) + 1
+        else:
+            raise ValueError("Could not infer rec_depth from blocks in checkpoint.")
+    else:
+        if "rec_layer_embedding.weight" not in state:
+            raise ValueError("Checkpoint missing rec_layer_embedding.weight for rec_depth inference.")
+        inferred_rec_depth = state["rec_layer_embedding.weight"].shape[0]
     embed_w = state["embedding.weight"]
     vocab_size, n_embd = embed_w.shape
     if standard_gpt:
