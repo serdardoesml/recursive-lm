@@ -81,7 +81,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False},
             {"params": block_params, "lr": train_config.lr_block, "use_muon": True},
         ]
-    ) # Muon Optimizer (https://arxiv.org/pdf/2502.16982)
+    ) # Muon Optimizer (https://arxiv.org/pdf/2502.16982, https://kellerjordan.github.io/posts/muon/)
 
     total_steps = int(
         (train_config.max_tok_count * train_config.epoch)

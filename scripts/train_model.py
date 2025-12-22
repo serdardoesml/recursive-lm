@@ -1,9 +1,23 @@
 import argparse
 import os
 
+import torch
+import torch.distributed as dist
+
 from recursive_lm.common import get_base_dir
 from recursive_lm.model import ModelConfig
 from recursive_lm.training import TrainingConfig, train
+
+def init_dist():
+    # Muon expects a default process group even for single-GPU runs.
+    if dist.is_available() and not dist.is_initialized():
+        os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+        os.environ.setdefault("MASTER_PORT", "29500")
+        os.environ.setdefault("RANK", "0")
+        os.environ.setdefault("WORLD_SIZE", "1")
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+        dist.init_process_group(backend=backend, init_method="env://")
+
 
 parser = argparse.ArgumentParser(description="Train RecursiveGPT")
 parser.add_argument("--dataset", type=str, required=True, help="Tokenized parquet filename under data/tokenized")
@@ -32,6 +46,7 @@ parser.add_argument("--standard_gpt", type=str, choices=["true", "false"], defau
 parser.add_argument("--save", type=str, choices=["true", "false"], default="true")
 
 args = parser.parse_args()
+init_dist()
 
 model_config = ModelConfig(
     sequence_len=args.sequence_len,
