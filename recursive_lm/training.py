@@ -79,7 +79,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     opt = MuonWithAuxAdam(
         [
             {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False},
-            {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "betas": (0.9, 0.95), "weight_decay": 0.005},
+            {"params": block_params, "lr": train_config.lr_block, "use_muon": True},
         ]
     ) # Muon Optimizer (https://arxiv.org/pdf/2502.16982)
 
