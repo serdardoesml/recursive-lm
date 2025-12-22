@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from muon import MuonWithAuxAdam
 from .model import RecursiveGPT, ModelConfig
 from .dataloader import batch_iterator
 from .common import get_base_dir
@@ -48,8 +49,8 @@ def get_linear_schedule_with_warmup(
 @dataclass
 class TrainingConfig:
     model_config: ModelConfig
-    lr_embed: float = 7e-3
-    lr_block: float = 7e-3
+    lr_embed: float = 3e-4
+    lr_block: float = 0.02 # Muon
 
     # Default target batch size: 65536 tok
     microbatch_tok: int = 32768
@@ -75,12 +76,12 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         block_params = list(model.blocks.parameters())
     else:
         block_params = list(model.recursive_block.parameters())
-    opt = torch.optim.AdamW(
+    opt = MuonWithAuxAdam(
         [
-            {"params": embed_params, "lr": train_config.lr_embed},
-            {"params": block_params, "lr": train_config.lr_block},
+            {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False},
+            {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "betas": (0.9, 0.95), "weight_decay": 0.005},
         ]
-    ) # TODO: Try muon optimizer
+    ) # Muon Optimizer (https://arxiv.org/pdf/2502.16982)
 
     total_steps = int(
         (train_config.max_tok_count * train_config.epoch)

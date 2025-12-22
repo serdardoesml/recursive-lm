@@ -52,6 +52,9 @@ class ModelConfig:
             return embed + ((attn + mlp) * self.rec_depth)
         else:
             return (2 * embed) + ((attn + mlp) * self.rec_depth)
+        
+    # Layer embeddings not calculated as they are negligible (around 10k-20k)
+    # TODO: Add layer embeddings too
 
 def norm(x):
     # x: [..., n_embd], purely functional rmsnorm with no learnable params
