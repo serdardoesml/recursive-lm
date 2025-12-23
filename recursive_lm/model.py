@@ -148,7 +148,10 @@ class Block(nn.Module):
         # In addition, we also do QK Norm inside the attention layer.
         # Same normalizations as Gemma 3 (https://arxiv.org/pdf/2503.19786)
         x = x + norm(self.attn(norm(x), cu_seqlens, max_seqlen, position_ids))
-        x = x + norm(self.mlp(norm(x)))
+        def mlp_step(x):
+            return self.mlp(norm(x))
+
+        x = x + norm(checkpoint.checkpoint(mlp_step, x, use_reentrant=False))
         return x
 
 class RecursiveGPT(nn.Module):
@@ -200,11 +203,8 @@ class RecursiveGPT(nn.Module):
                 x = self.blocks[i](x, cu_seqlens, self.config.sequence_len, position_ids)
         else:
             for i in range(self.config.rec_depth):
-                def recursive_step(x, cu_seqlens, position_ids, i=i):
-                    x = x + self.rec_layer_embedding.weight[i]
-                    return self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
-
-                x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, use_reentrant=True)
+                x = x + self.rec_layer_embedding.weight[i]
+                x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
         if not self.config.tie_embed:
             return self.lm_head(norm(x)) # [total_tokens, vocab_size]
         else:
