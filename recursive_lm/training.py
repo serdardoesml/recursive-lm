@@ -146,7 +146,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 avg_step_time = (now - start_time) / step
                 remaining = avg_step_time * (total_steps - step)
                 lr_embed, lr_block = scheduler.get_last_lr()
-                tok_per_s = train_config.microbatch_tok / step_time
+                tok_per_s = (train_config.microbatch_tok * train_config.grad_acc) / step_time
                 tokens_processed = step * train_config.microbatch_tok * train_config.grad_acc
                 print(
                     f"Epoch {epoch_idx + 1}/{train_config.epoch} "
