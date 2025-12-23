@@ -52,6 +52,11 @@ class TrainingConfig:
     lr_embed: float = 0.007
     lr_block: float = 0.02 # Muon
 
+    # MASSIVE reduction in memory use as memory usage essentially reduces to single depth.
+    # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
+    # Essentially makes training compute bound, useful for super high depths or large MLP multipliers on small GPUs.
+    grad_checkpointing: bool = False 
+
     # Default target batch size: 65536 tok
     microbatch_tok: int = 32768
     grad_acc: int = 2
@@ -66,7 +71,10 @@ class TrainingConfig:
     max_grad_norm: float = 1.0
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
-    model = RecursiveGPT(train_config.model_config).to(device)
+    model = RecursiveGPT(
+        train_config.model_config,
+        grad_checkpointing=train_config.grad_checkpointing,
+    ).to(device)
     embed_params = list(model.embedding.parameters())
     if hasattr(model, "lm_head"):
         embed_params += list(model.lm_head.parameters())
@@ -112,6 +120,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         "Training summary | "
         f"epochs {train_config.epoch} | "
         f"total_steps {total_steps} | "
+        f"grad_checkpointing {train_config.grad_checkpointing} | "
         f"lr_embed {train_config.lr_embed:.6g} | "
         f"lr_block {train_config.lr_block:.6g} | "
         f"distinct params {train_config.model_config.total_param_size:,} | "

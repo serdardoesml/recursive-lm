@@ -32,6 +32,7 @@ parser.add_argument("--mlp_mul", type=int, default=ModelConfig.mlp_mul)
 parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
 parser.add_argument("--tie_embed", type=str, choices=["true", "false"], default="true")
 parser.add_argument("--standard_gpt", type=str, choices=["true", "false"], default="false") # For experiments
+parser.add_argument("--grad_checkpointing", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--save", type=str, choices=["true", "false"], default="true")
 
 args = parser.parse_args()
@@ -73,6 +74,7 @@ train_config = TrainingConfig(
     run_name=args.run_name or None,
     grad_clip=args.grad_clip == "true",
     max_grad_norm=args.max_grad_norm,
+    grad_checkpointing=args.grad_checkpointing == "true",
 )
 
 parquet_path = os.path.join(get_base_dir(), "data", "tokenized", args.dataset)

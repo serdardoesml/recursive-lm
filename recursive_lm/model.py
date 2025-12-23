@@ -148,10 +148,7 @@ class Block(nn.Module):
         # In addition, we also do QK Norm inside the attention layer.
         # Same normalizations as Gemma 3 (https://arxiv.org/pdf/2503.19786)
         x = x + norm(self.attn(norm(x), cu_seqlens, max_seqlen, position_ids))
-        def mlp_step(x):
-            return self.mlp(norm(x))
-
-        x = x + norm(checkpoint.checkpoint(mlp_step, x, use_reentrant=False))
+        x = x + norm(self.mlp(norm(x)))
         return x
 
 class RecursiveGPT(nn.Module):
@@ -171,9 +168,10 @@ class RecursiveGPT(nn.Module):
         freqs = torch.outer(t, inv_freq)  # [max_seqlen, half]
         return freqs.cos(), freqs.sin()
 
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: ModelConfig, grad_checkpointing: bool = False):
         super().__init__()
         self.config = config
+        self.grad_checkpointing = grad_checkpointing
 
         # Assert config is correct
         assert config.n_embd % config.n_head == 0
@@ -203,8 +201,15 @@ class RecursiveGPT(nn.Module):
                 x = self.blocks[i](x, cu_seqlens, self.config.sequence_len, position_ids)
         else:
             for i in range(self.config.rec_depth):
-                x = x + self.rec_layer_embedding.weight[i]
-                x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
+                if self.grad_checkpointing:
+                    def recursive_step(x, cu_seqlens, position_ids, i=i):
+                        x = x + self.rec_layer_embedding.weight[i]
+                        return self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
+
+                    x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, use_reentrant=False)
+                else:
+                    x = x + self.rec_layer_embedding.weight[i]
+                    x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
         if not self.config.tie_embed:
             return self.lm_head(norm(x)) # [total_tokens, vocab_size]
         else:
