@@ -105,6 +105,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             project=train_config.wandb_project,
             name=train_config.run_name,
         )
+        wandb.define_metric("tokens_processed")
+        wandb.define_metric("*", step_metric="tokens_processed")
 
     print(
         "Training summary | "
@@ -145,6 +147,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 remaining = avg_step_time * (total_steps - step)
                 lr_embed, lr_block = scheduler.get_last_lr()
                 tok_per_s = train_config.microbatch_tok / step_time
+                tokens_processed = step * train_config.microbatch_tok * train_config.grad_acc
                 print(
                     f"Epoch {epoch_idx + 1}/{train_config.epoch} "
                     f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
@@ -158,13 +161,14 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                             "epoch": epoch_idx + 1,
                             "step": step,
                             "total_steps": total_steps,
+                            "tokens_processed": tokens_processed,
                             "loss": avg_loss,
                             "lr_embed": lr_embed,
                             "lr_block": lr_block,
                             "step_time_s": step_time,
                             "tok_per_s": tok_per_s,
                         },
-                        step=step,
+                        step=tokens_processed,
                     )
                 last_step_time = now
                 if step >= total_steps:
