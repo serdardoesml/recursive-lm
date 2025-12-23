@@ -199,13 +199,12 @@ class RecursiveGPT(nn.Module):
             for i in range(self.config.rec_depth):
                 x = self.blocks[i](x, cu_seqlens, self.config.sequence_len, position_ids)
         else:
-            def recursive_loop(x, cu_seqlens, position_ids):
-                for i in range(self.config.rec_depth):
+            for i in range(self.config.rec_depth):
+                def recursive_step(x, cu_seqlens, position_ids, i=i):
                     x = x + self.rec_layer_embedding.weight[i]
-                    x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
-                return x
+                    return self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
 
-            x = checkpoint.checkpoint(recursive_loop, x, cu_seqlens, position_ids, use_reentrant=True)
+                x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, use_reentrant=False)
         if not self.config.tie_embed:
             return self.lm_head(norm(x)) # [total_tokens, vocab_size]
         else:
