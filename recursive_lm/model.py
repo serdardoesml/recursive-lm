@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint as checkpoint
 
 from flash_attn import flash_attn_varlen_qkvpacked_func # type: ignore
 
@@ -198,9 +199,13 @@ class RecursiveGPT(nn.Module):
             for i in range(self.config.rec_depth):
                 x = self.blocks[i](x, cu_seqlens, self.config.sequence_len, position_ids)
         else:
-            for i in range(self.config.rec_depth):
-                x = x + self.rec_layer_embedding.weight[i]
-                x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
+            def recursive_loop(x, cu_seqlens, position_ids):
+                for i in range(self.config.rec_depth):
+                    x = x + self.rec_layer_embedding.weight[i]
+                    x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
+                return x
+
+            x = checkpoint.checkpoint(recursive_loop, x, cu_seqlens, position_ids, use_reentrant=False)
         if not self.config.tie_embed:
             return self.lm_head(norm(x)) # [total_tokens, vocab_size]
         else:
