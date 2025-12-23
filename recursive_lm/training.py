@@ -49,8 +49,8 @@ def get_linear_schedule_with_warmup(
 @dataclass
 class TrainingConfig:
     model_config: ModelConfig
-    lr_embed: float = 0.008
-    lr_block: float = 0.023 # Muon
+    lr_embed: float = 0.007
+    lr_block: float = 0.02 # Muon
 
     # Default target batch size: 65536 tok
     microbatch_tok: int = 32768
@@ -79,7 +79,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     opt = MuonWithAuxAdam(
         [
             {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": 0.005},
-            {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": 1.2},
+            {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": 0.1},
         ]
     ) # Muon Optimizer (https://arxiv.org/pdf/2502.16982, https://kellerjordan.github.io/posts/muon/)
 
