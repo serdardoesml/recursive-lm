@@ -205,7 +205,7 @@ class RecursiveGPT(nn.Module):
                     x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
                 return x
 
-            x = checkpoint.checkpoint(recursive_loop, x, cu_seqlens, position_ids, use_reentrant=False)
+            x = checkpoint.checkpoint(recursive_loop, x, cu_seqlens, position_ids, use_reentrant=True)
         if not self.config.tie_embed:
             return self.lm_head(norm(x)) # [total_tokens, vocab_size]
         else:
