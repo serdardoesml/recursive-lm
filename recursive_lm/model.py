@@ -84,6 +84,8 @@ class CausalVarlenSelfAttention(nn.Module):
         # One fused projection for QKV
         self.Wqkv = nn.Linear(config.n_embd, 3 * config.n_embd, bias=False)
         self.Wo   = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        with torch.no_grad():
+            self.Wo.weight.mul_((2.0 * config.rec_depth) ** -0.5)
         self.n_embd = config.n_embd
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
@@ -130,12 +132,14 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_embd, config.n_embd * config.mlp_mul, bias=False)
         self.c_gate = nn.Linear(config.n_embd, config.n_embd * config.mlp_mul, bias=False)
         self.c_proj = nn.Linear(config.n_embd * config.mlp_mul, config.n_embd, bias=False)
+        with torch.no_grad():
+            self.c_proj.weight.mul_((2.0 * config.rec_depth) ** -0.5)
 
     def forward(self, x):
         # x: [total_tokens, n_embd]
         x_fc = self.c_fc(x)
         x_gate = self.c_gate(x)
-        x = F.silu(x_gate) * x_fc
+        x = F.silu(x_gate) * x_fc # SwiGLU, improved training speed a lot from ReLU^2, so we keep it
         x = self.c_proj(x)
         return x
     
