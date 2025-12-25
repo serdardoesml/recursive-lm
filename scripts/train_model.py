@@ -27,7 +27,8 @@ parser.add_argument("--max_grad_norm", type=float, default=TrainingConfig.max_gr
 parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
 parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
 parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
-parser.add_argument("--n_embd", type=int, default=ModelConfig.n_embd)
+parser.add_argument("--n_hidden", type=int, default=ModelConfig.n_hidden)
+parser.add_argument("--n_wembed", type=int, default=ModelConfig.n_wembed)
 parser.add_argument("--mlp_mul", type=int, default=ModelConfig.mlp_mul)
 parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
 parser.add_argument("--tie_embed", type=str, choices=["true", "false"], default="true")
@@ -53,7 +54,8 @@ model_config = ModelConfig(
     sequence_len=args.sequence_len,
     vocab_size=args.vocab_size,
     n_head=args.n_head,
-    n_embd=args.n_embd,
+    n_hidden=args.n_hidden,
+    n_wembed=args.n_wembed,
     mlp_mul=args.mlp_mul,
     rec_depth=args.rec_depth,
     tie_embed=args.tie_embed == "true",

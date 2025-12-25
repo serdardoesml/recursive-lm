@@ -63,17 +63,23 @@ def main():
             raise ValueError("Checkpoint missing rec_layer_embedding.weight for rec_depth inference.")
         inferred_rec_depth = state["rec_layer_embedding.weight"].shape[0]
     embed_w = state["embedding.weight"]
-    vocab_size, n_embd = embed_w.shape
+    vocab_size, embed_dim = embed_w.shape
+    if "e_to_h.weight" in state:
+        n_hidden, n_wembed = state["e_to_h.weight"].shape
+    else:
+        n_hidden = embed_dim
+        n_wembed = embed_dim
     if standard_gpt:
         mlp_key = "blocks.0.mlp.c_fc.weight"
     else:
         mlp_key = "recursive_block.mlp.c_fc.weight"
-    mlp_mul = state[mlp_key].shape[0] // n_embd
+    mlp_mul = state[mlp_key].shape[0] // n_hidden
     config = ModelConfig(
         sequence_len=args.sequence_len,
         vocab_size=vocab_size,
         n_head=args.n_head,
-        n_embd=n_embd,
+        n_hidden=n_hidden,
+        n_wembed=n_wembed,
         mlp_mul=mlp_mul,
         rec_depth=inferred_rec_depth,
         tie_embed=tie_embed,
@@ -284,7 +290,7 @@ def main():
                 "tokenizer": args.tokenizer,
                 "rec_depth": int(config.rec_depth),
                 "n_head": int(config.n_head),
-                "n_embd": int(config.n_embd),
+                "n_hidden": int(config.n_hidden),
                 "sequence_len": int(config.sequence_len),
                 "prompt": prompt,
                 "prompt_token_count": int(len(tokens)),

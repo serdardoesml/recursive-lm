@@ -76,6 +76,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device)
     embed_params = list(model.embedding.parameters())
+    embed_params += list(model.e_to_h.parameters())
+    embed_params += list(model.h_to_e.parameters())
     if hasattr(model, "lm_head"):
         embed_params += list(model.lm_head.parameters())
     if hasattr(model, "rec_layer_embedding"):

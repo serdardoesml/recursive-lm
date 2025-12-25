@@ -14,7 +14,8 @@ class ModelConfig:
     sequence_len: int = 256
     vocab_size: int = 32768
     n_head: int = 16 # number of attention heads
-    n_embd: int = 1024
+    n_hidden: int = 1024
+    n_wembed: int = 128
     mlp_mul: int = 8
     rec_depth: int = 4
     tie_embed: bool = True
@@ -22,43 +23,37 @@ class ModelConfig:
     # Standard gpt experimental mode to compare with non-recursive models
     standard_gpt: bool = False
 
-    # Default param count
-    # Embed: 32768 x 1024 = 33.554.432
-    # Attn: 1024^2 x 3 = 4.194.304
-    # Mlp: 1024^2 x 8 x 2 = 16.777.216
-    # Total: 33.554.432 Embed, 20.971.520 Non-Embed, 54.525.952 total
-
     @property
     def n_headdim(self) -> int:
-        return self.n_embd // self.n_head
+        return self.n_hidden // self.n_head
 
     @property
     def total_param_size(self) -> int:
         if self.standard_gpt:
             return self.total_unrolled_param_size
-        embed = self.vocab_size * self.n_embd
-        attn = (self.n_embd * 4 * self.n_embd)
-        mlp = (self.n_embd * self.n_embd * self.mlp_mul) * 2
+        embed = (self.vocab_size * self.n_wembed) + (2 * self.n_hidden * self.n_wembed)
+        attn = (self.n_hidden * 4 * self.n_hidden)
+        mlp = (self.n_hidden * self.n_hidden * self.mlp_mul) * 2
         if self.tie_embed:
             return embed + attn + mlp
         else:
-            return (2 * embed) + attn + mlp
+            return embed + (self.vocab_size * self.n_wembed) + attn + mlp
         
     @property
     def total_unrolled_param_size(self) -> int:
-        embed = self.vocab_size * self.n_embd
-        attn = (self.n_embd * 4 * self.n_embd)
-        mlp = (self.n_embd * self.n_embd * self.mlp_mul) * 2
+        embed = (self.vocab_size * self.n_wembed) + (2 * self.n_hidden * self.n_wembed)
+        attn = (self.n_hidden * 4 * self.n_hidden)
+        mlp = (self.n_hidden * self.n_hidden * self.mlp_mul) * 2
         if self.tie_embed:
             return embed + ((attn + mlp) * self.rec_depth)
         else:
-            return (2 * embed) + ((attn + mlp) * self.rec_depth)
+            return embed + (self.vocab_size * self.n_wembed) + ((attn + mlp) * self.rec_depth)
         
     # Layer embeddings not calculated as they are negligible (around 10k-20k)
     # TODO: Add layer embeddings too
 
 def norm(x):
-    # x: [..., n_embd], purely functional rmsnorm with no learnable params
+    # x: [..., n_hidden], purely functional rmsnorm with no learnable params
     # TODO: Try Derf (https://arxiv.org/pdf/2512.10938)
     return F.rms_norm(x, (x.size(-1),))
 
@@ -82,11 +77,11 @@ class CausalVarlenSelfAttention(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
         super().__init__()
         # One fused projection for QKV
-        self.Wqkv = nn.Linear(config.n_embd, 3 * config.n_embd, bias=False)
-        self.Wo   = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        self.Wqkv = nn.Linear(config.n_hidden, 3 * config.n_hidden, bias=False)
+        self.Wo   = nn.Linear(config.n_hidden, config.n_hidden, bias=False)
         with torch.no_grad():
             self.Wo.weight.mul_((2.0 * config.rec_depth) ** -0.5)
-        self.n_embd = config.n_embd
+        self.n_hidden = config.n_hidden
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
         # We register it as a buffer to ensure it gets moved to device together with the model
@@ -95,12 +90,12 @@ class CausalVarlenSelfAttention(nn.Module):
     
     def forward(self, x, cu_seqlens, max_seqlen, position_ids):
         """
-        x: [total_tokens, n_embd] (flattened packed tokens)
+        x: [total_tokens, n_hidden] (flattened packed tokens)
         cu_seqlens: [n_seqs+1] int32
         max_seqlen: int
         position_ids:[N]
 
-        Returns: [total_tokens, n_embd]
+        Returns: [total_tokens, n_hidden]
         """
         # Project to QKV and reshape to [total, 3, n_heads, head_dim]
         qkv = self.Wqkv(x)
@@ -123,20 +118,20 @@ class CausalVarlenSelfAttention(nn.Module):
             causal=True,
         )  # out: [total_tokens, n_heads, head_dim] 
 
-        out = out.reshape(-1, self.n_embd)
-        return self.Wo(out) # [total_tokens, n_embd]
+        out = out.reshape(-1, self.n_hidden)
+        return self.Wo(out) # [total_tokens, n_hidden]
     
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_embd, config.n_embd * config.mlp_mul, bias=False)
-        self.c_gate = nn.Linear(config.n_embd, config.n_embd * config.mlp_mul, bias=False)
-        self.c_proj = nn.Linear(config.n_embd * config.mlp_mul, config.n_embd, bias=False)
+        self.c_fc = nn.Linear(config.n_hidden, config.n_hidden * config.mlp_mul, bias=False)
+        self.c_gate = nn.Linear(config.n_hidden, config.n_hidden * config.mlp_mul, bias=False)
+        self.c_proj = nn.Linear(config.n_hidden * config.mlp_mul, config.n_hidden, bias=False)
         with torch.no_grad():
             self.c_proj.weight.mul_((2.0 * config.rec_depth) ** -0.5)
 
     def forward(self, x):
-        # x: [total_tokens, n_embd]
+        # x: [total_tokens, n_hidden]
         x_fc = self.c_fc(x)
         x_gate = self.c_gate(x)
         x = F.silu(x_gate) * x_fc # SwiGLU, improved training speed a lot from ReLU^2, so we keep it
@@ -183,14 +178,18 @@ class RecursiveGPT(nn.Module):
         self.grad_checkpointing = grad_checkpointing
 
         # Assert config is correct
-        assert config.n_embd % config.n_head == 0
+        assert config.n_hidden % config.n_head == 0
 
         # We build cache then register it as a buffer later to ensure it gets moved to device together with the model
         cos_cache, sin_cache = RecursiveGPT.build_rope_cache(config.sequence_len, config.n_headdim)
 
-        self.embedding = nn.Embedding(config.vocab_size, config.n_embd)
+        # Factorized Embeddings (https://arxiv.org/pdf/1909.11942)
+        self.embedding = nn.Embedding(config.vocab_size, config.n_wembed)
         if not self.config.tie_embed:
-            self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+            self.lm_head = nn.Linear(config.n_wembed, config.vocab_size, bias=False)
+
+        self.e_to_h = nn.Linear(config.n_wembed, config.n_hidden, bias=False)
+        self.h_to_e = nn.Linear(config.n_hidden, config.n_wembed, bias=False)
         
         if config.standard_gpt:
             self.blocks = nn.ModuleList([Block(config, cos_cache, sin_cache) for _ in range(config.rec_depth)])
@@ -199,12 +198,12 @@ class RecursiveGPT(nn.Module):
 
             # Layer embeddings (https://arxiv.org/pdf/2502.13181)
             # Note: Our layer embeddings are simpler than RingFormers, but the idea came from there.
-            self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_embd)
+            self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_hidden)
             nn.init.zeros_(self.rec_layer_embedding.weight)
 
     def forward(self, input_ids, cu_seqlens, position_ids):
         # input_ids: [total_tokens] (flattened)
-        x = self.embedding(input_ids)  # [total_tokens, n_embd]
+        x = self.e_to_h(self.embedding(input_ids))  # [total_tokens, n_hidden]
         if self.config.standard_gpt:
             for i in range(self.config.rec_depth):
                 x = self.blocks[i](x, cu_seqlens, self.config.sequence_len, position_ids)
@@ -220,6 +219,6 @@ class RecursiveGPT(nn.Module):
                     x = x + self.rec_layer_embedding.weight[i]
                     x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
         if not self.config.tie_embed:
-            return self.lm_head(norm(x)) # [total_tokens, vocab_size]
+            return self.lm_head(norm(self.h_to_e(x))) # [total_tokens, vocab_size]
         else:
-            return F.linear(norm(x), self.embedding.weight) # [total_tokens, vocab_size]
+            return F.linear(norm(self.h_to_e(x)), self.embedding.weight) # [total_tokens, vocab_size]
