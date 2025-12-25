@@ -147,9 +147,10 @@ class Block(nn.Module):
         # We do both Pre and Post RMSNorm (without affecting the residual stream)
         # In addition, we also do QK Norm inside the attention layer.
         # Same normalizations as Gemma 3 (https://arxiv.org/pdf/2503.19786)
-        
-        x = x + norm(self.attn(norm(x), cu_seqlens, max_seqlen, position_ids))
-        x = x + norm(self.mlp(norm(x)))
+
+        # TEMPORARILY REMOVED POST NORM
+        x = x + self.attn(norm(x), cu_seqlens, max_seqlen, position_ids)
+        x = x + self.mlp(norm(x))
         return x
 
 class RecursiveGPT(nn.Module):
