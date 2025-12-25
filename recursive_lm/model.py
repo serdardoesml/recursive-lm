@@ -128,12 +128,14 @@ class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, config.n_embd * config.mlp_mul, bias=False)
+        self.c_gate = nn.Linear(config.n_embd, config.n_embd * config.mlp_mul, bias=False)
         self.c_proj = nn.Linear(config.n_embd * config.mlp_mul, config.n_embd, bias=False)
 
     def forward(self, x):
         # x: [total_tokens, n_embd]
-        x = self.c_fc(x)
-        x = F.relu(x).square()
+        x_fc = self.c_fc(x)
+        x_gate = self.c_gate(x)
+        x = F.silu(x_gate) * x_fc
         x = self.c_proj(x)
         return x
     
@@ -149,6 +151,7 @@ class Block(nn.Module):
         # Same normalizations as Gemma 3 (https://arxiv.org/pdf/2503.19786)
 
         # TEMPORARILY REMOVED POST NORM
+        # TODO: Update this comment to reflect post norm removal results and why we kept it.
         x = x + self.attn(norm(x), cu_seqlens, max_seqlen, position_ids)
         x = x + self.mlp(norm(x))
         return x
