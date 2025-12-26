@@ -52,10 +52,18 @@ class ModelConfig:
     # Layer embeddings not calculated as they are negligible (around 10k-20k)
     # TODO: Add layer embeddings too
 
-def norm(x):
-    # x: [..., n_hidden], purely functional rmsnorm with no learnable params
-    # TODO: Try Derf (https://arxiv.org/pdf/2512.10938)
-    return F.rms_norm(x, (x.size(-1),))
+class RMSNorm(nn.Module):
+    # Replaced initial unparameterized norm with this to enable more flexibility for the model.
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x):
+        # x: [..., dim]
+        rms = torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        return x * rms * self.weight
 
 def apply_rotary_emb(x, cos, sin):
     """
@@ -84,6 +92,7 @@ class CausalVarlenSelfAttention(nn.Module):
         self.n_hidden = config.n_hidden
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
+        self.norm_qk = RMSNorm(self.head_dim)
         # We register it as a buffer to ensure it gets moved to device together with the model
         self.register_buffer("cos_cache", cos_cache, persistent=False)
         self.register_buffer("sin_cache", sin_cache, persistent=False)
@@ -107,8 +116,8 @@ class CausalVarlenSelfAttention(nn.Module):
 
         # qkv[:, 0] is Q: [N, H, D], qkv[:, 1] is K: [N, H, D]
         # We also apply QK norm
-        qkv[:, 0] = norm(apply_rotary_emb(qkv[:, 0], cos, sin))
-        qkv[:, 1] = norm(apply_rotary_emb(qkv[:, 1], cos, sin))
+        qkv[:, 0] = self.norm_qk(apply_rotary_emb(qkv[:, 0], cos, sin))
+        qkv[:, 1] = self.norm_qk(apply_rotary_emb(qkv[:, 1], cos, sin))
 
         out = flash_attn_varlen_qkvpacked_func(
             qkv=qkv,
@@ -143,6 +152,8 @@ class Block(nn.Module):
         super().__init__()
         self.attn = CausalVarlenSelfAttention(config, cos_cache, sin_cache)
         self.mlp = MLP(config)
+        self.norm_attn = RMSNorm(config.n_hidden)
+        self.norm_mlp = RMSNorm(config.n_hidden)
 
     def forward(self, x, cu_seqlens, max_seqlen, position_ids):
         # We do both Pre and Post RMSNorm (without affecting the residual stream)
@@ -151,8 +162,8 @@ class Block(nn.Module):
 
         # TEMPORARILY REMOVED POST NORM
         # TODO: Update this comment to reflect post norm removal results and why we kept it.
-        x = x + self.attn(norm(x), cu_seqlens, max_seqlen, position_ids)
-        x = x + self.mlp(norm(x))
+        x = x + self.attn(self.norm_attn(x), cu_seqlens, max_seqlen, position_ids)
+        x = x + self.mlp(self.norm_mlp(x))
         return x
 
 class RecursiveGPT(nn.Module):
@@ -190,6 +201,7 @@ class RecursiveGPT(nn.Module):
 
         self.e_to_h = nn.Linear(config.n_wembed, config.n_hidden, bias=False)
         self.h_to_e = nn.Linear(config.n_hidden, config.n_wembed, bias=False)
+        self.norm_out = RMSNorm(config.n_wembed)
         
         if config.standard_gpt:
             self.blocks = nn.ModuleList([Block(config, cos_cache, sin_cache) for _ in range(config.rec_depth)])
@@ -219,6 +231,6 @@ class RecursiveGPT(nn.Module):
                     x = x + self.rec_layer_embedding.weight[i]
                     x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
         if not self.config.tie_embed:
-            return self.lm_head(norm(self.h_to_e(x))) # [total_tokens, vocab_size]
+            return self.lm_head(self.norm_out(self.h_to_e(x))) # [total_tokens, vocab_size]
         else:
-            return F.linear(norm(self.h_to_e(x)), self.embedding.weight) # [total_tokens, vocab_size]
+            return F.linear(self.norm_out(self.h_to_e(x)), self.embedding.weight) # [total_tokens, vocab_size]

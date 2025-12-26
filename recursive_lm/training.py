@@ -51,6 +51,8 @@ class TrainingConfig:
     model_config: ModelConfig
     lr_embed: float = 0.007
     lr_block: float = 0.02 # Muon
+    wd_adam: float = 0.005
+    wd_muon: float = 0.1
 
     # MASSIVE reduction in memory use as memory usage essentially reduces to single depth.
     # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
@@ -88,8 +90,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         block_params = list(model.recursive_block.parameters())
     opt = MuonWithAuxAdam(
         [
-            {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": 0.005},
-            {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": 0.1},
+            {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
+            {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": train_config.wd_muon},
         ]
     ) # Muon Optimizer (https://arxiv.org/pdf/2502.16982, https://kellerjordan.github.io/posts/muon/)
 
@@ -125,6 +127,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         f"grad_checkpointing {train_config.grad_checkpointing} | "
         f"lr_embed {train_config.lr_embed:.6g} | "
         f"lr_block {train_config.lr_block:.6g} | "
+        f"wd_adam {train_config.wd_adam:.6g} | "
+        f"wd_muon {train_config.wd_muon:.6g} | "
         f"distinct params {train_config.model_config.total_param_size:,} | "
         f"unrolled params {train_config.model_config.total_unrolled_param_size:,}"
     )

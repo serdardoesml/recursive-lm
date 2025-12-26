@@ -13,6 +13,8 @@ parser.add_argument("--dataset", type=str, required=True, help="Tokenized parque
 
 parser.add_argument("--lr_embed", type=float, default=TrainingConfig.lr_embed)
 parser.add_argument("--lr_block", type=float, default=TrainingConfig.lr_block)
+parser.add_argument("--wd_adam", type=float, default=TrainingConfig.wd_adam)
+parser.add_argument("--wd_muon", type=float, default=TrainingConfig.wd_muon)
 parser.add_argument("--microbatch_tok", type=int, default=TrainingConfig.microbatch_tok)
 parser.add_argument("--grad_acc", type=int, default=TrainingConfig.grad_acc)
 parser.add_argument("--max_tok_count", type=int, default=TrainingConfig.max_tok_count)
@@ -66,6 +68,8 @@ train_config = TrainingConfig(
     model_config=model_config,
     lr_embed=args.lr_embed,
     lr_block=args.lr_block,
+    wd_adam=args.wd_adam,
+    wd_muon=args.wd_muon,
     microbatch_tok=args.microbatch_tok,
     grad_acc=args.grad_acc,
     max_tok_count=args.max_tok_count,
