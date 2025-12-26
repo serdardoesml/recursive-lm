@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from muon import MuonWithAuxAdam
-from .model import RecursiveGPT, ModelConfig
+from .model import RecursiveGPT, ModelConfig, RMSNorm
 from .dataloader import batch_iterator
 from .common import get_base_dir
 
@@ -80,6 +80,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     embed_params = list(model.embedding.parameters())
     embed_params += list(model.e_to_h.parameters())
     embed_params += list(model.h_to_e.parameters())
+    for module in model.modules():
+        if isinstance(module, RMSNorm):
+            embed_params += list(module.parameters())
     if hasattr(model, "lm_head"):
         embed_params += list(model.lm_head.parameters())
     if hasattr(model, "rec_layer_embedding"):
