@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from muon import MuonWithAuxAdam
-from .model import RecursiveGPT, ModelConfig, RMSNorm
+from .model import RecursiveGPT, ModelConfig
 from .dataloader import batch_iterator
 from .common import get_base_dir
 
@@ -77,20 +77,34 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         train_config.model_config,
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device)
+
+    # Set up parameter groups
     embed_params = list(model.embedding.parameters())
     embed_params += list(model.e_to_h.parameters())
     embed_params += list(model.h_to_e.parameters())
-    for module in model.modules():
-        if isinstance(module, RMSNorm):
-            embed_params += list(module.parameters())
+    embed_params += list(model.norm_out.parameters())
     if hasattr(model, "lm_head"):
         embed_params += list(model.lm_head.parameters())
     if hasattr(model, "rec_layer_embedding"):
         embed_params += list(model.rec_layer_embedding.parameters())
     if train_config.model_config.standard_gpt:
-        block_params = list(model.blocks.parameters())
+        for block in model.blocks:
+            embed_params += list(block.norm_attn.parameters())
+            embed_params += list(block.norm_mlp.parameters())
+            embed_params += list(block.attn.norm_qk.parameters())
+        block_params = []
+        for block in model.blocks:
+            block_params += list(block.attn.Wqkv.parameters())
+            block_params += list(block.attn.Wo.parameters())
+            block_params += list(block.mlp.parameters())
     else:
-        block_params = list(model.recursive_block.parameters())
+        embed_params += list(model.recursive_block.norm_attn.parameters())
+        embed_params += list(model.recursive_block.norm_mlp.parameters())
+        embed_params += list(model.recursive_block.attn.norm_qk.parameters())
+        block_params = list(model.recursive_block.attn.Wqkv.parameters())
+        block_params += list(model.recursive_block.attn.Wo.parameters())
+        block_params += list(model.recursive_block.mlp.parameters())
+
     opt = MuonWithAuxAdam(
         [
             {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
