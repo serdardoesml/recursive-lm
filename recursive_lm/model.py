@@ -87,8 +87,7 @@ class CausalVarlenSelfAttention(nn.Module):
         # One fused projection for QKV
         self.Wqkv = nn.Linear(config.n_hidden, 3 * config.n_hidden, bias=False)
         self.Wo   = nn.Linear(config.n_hidden, config.n_hidden, bias=False)
-        with torch.no_grad():
-            self.Wo.weight.mul_((2.0 * config.rec_depth) ** -0.5)
+        nn.init.zeros_(self.Wo.weight) # Zero init (https://arxiv.org/pdf/2203.03466)
         self.n_hidden = config.n_hidden
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
@@ -136,8 +135,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_hidden, config.n_hidden * config.mlp_mul, bias=False)
         self.c_gate = nn.Linear(config.n_hidden, config.n_hidden * config.mlp_mul, bias=False)
         self.c_proj = nn.Linear(config.n_hidden * config.mlp_mul, config.n_hidden, bias=False)
-        with torch.no_grad():
-            self.c_proj.weight.mul_((2.0 * config.rec_depth) ** -0.5)
+        nn.init.zeros_(self.c_proj.weight) # Zero init (https://arxiv.org/pdf/2203.03466)
 
     def forward(self, x):
         # x: [total_tokens, n_hidden]
