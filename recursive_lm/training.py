@@ -116,7 +116,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
             {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": train_config.wd_muon},
         ]
-    ) # Muon Optimizer (https://arxiv.org/pdf/2502.16982, https://kellerjordan.github.io/posts/muon/)
+    ) # NorMuon optimizer with CWD (References in optimizer.py)
 
     total_steps = int(
         (train_config.max_tok_count * train_config.epoch)
