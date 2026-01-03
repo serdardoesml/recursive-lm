@@ -18,37 +18,35 @@ def get_linear_schedule_with_warmup(
     last_epoch: int = -1,
 ):
     base_lrs = [group["lr"] for group in optimizer.param_groups]
-    end_factors = [
-        (min_lr / lr) if lr > 0 else 1.0
-        for lr, min_lr in zip(base_lrs, min_lrs, strict=True)
-    ]
-    if num_warmup_steps <= 0:
-        return torch.optim.lr_scheduler.LinearLR(
-            optimizer,
-            start_factor=1.0,
-            end_factor=end_factors,
-            total_iters=max(1, num_training_steps),
-            last_epoch=last_epoch,
-        )
+    min_factors = []
+    for lr, min_lr in zip(base_lrs, min_lrs, strict=True):
+        if lr <= 0:
+            min_factor = 1.0
+        else:
+            min_factor = min_lr / lr
+            if not 0 <= min_factor <= 1:
+                raise ValueError(f"min_lr must be in [0, base_lr], got min_lr={min_lr} base_lr={lr}")
+        min_factors.append(min_factor)
+    warmup_steps = max(0, num_warmup_steps)
+    total_steps = max(1, num_training_steps)
+    decay_steps = max(1, total_steps - warmup_steps)
+    warmup_start = 1e-8
 
-    warmup = torch.optim.lr_scheduler.LinearLR(
+    def build_lambda(min_factor: float):
+        def lr_lambda(step: int):
+            if warmup_steps > 0 and step < warmup_steps:
+                return warmup_start + (1.0 - warmup_start) * (step / warmup_steps)
+            decay_step = step - warmup_steps
+            if decay_step >= decay_steps:
+                return min_factor
+            decay_progress = decay_step / decay_steps
+            return (1.0 - decay_progress) * (1.0 - min_factor) + min_factor
+        return lr_lambda
+
+    lr_lambdas = [build_lambda(min_factor) for min_factor in min_factors]
+    return torch.optim.lr_scheduler.LambdaLR(
         optimizer,
-        start_factor=1e-8,
-        end_factor=1.0,
-        total_iters=num_warmup_steps,
-        last_epoch=last_epoch,
-    )
-    decay = torch.optim.lr_scheduler.LinearLR(
-        optimizer,
-        start_factor=1.0,
-        end_factor=end_factors,
-        total_iters=max(1, num_training_steps - num_warmup_steps),
-        last_epoch=last_epoch,
-    )
-    return torch.optim.lr_scheduler.SequentialLR(
-        optimizer,
-        schedulers=[warmup, decay],
-        milestones=[num_warmup_steps],
+        lr_lambda=lr_lambdas,
         last_epoch=last_epoch,
     )
 
