@@ -4,7 +4,6 @@
 """
 
 import torch
-import torch.distributed as dist
 
 # copied from https://github.com/KellerJordan/Muon/blob/master/muon.py
 def zeropower_via_newtonschulz5(G, steps=5):
