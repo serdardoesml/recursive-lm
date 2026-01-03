@@ -1,6 +1,9 @@
 """
  NorMuon optimizer (https://arxiv.org/pdf/2510.05491)
  Code copied and modified from https://github.com/zichongli5/NorMuon/
+
+ Modified to implement Cautious Weight Decay (https://arxiv.org/pdf/2510.12402)
+ CWD decays only coordinates where update and parameter align.
 """
 
 import torch
@@ -106,7 +109,12 @@ class SingleDeviceNorMuonWithAuxAdam(torch.optim.Optimizer):
                     update = normuon_update(p.grad, state["momentum_buffer"], state["second_momentum_buffer"],
                                             beta=group["momentum"], beta2=group["beta2"])
                     if group["weight_decay"] and had_grad:
-                        p.mul_(1 - group["lr"] * group["weight_decay"])
+                        # Cautious Weight Decay
+                        lr = group["lr"]
+                        wd = group["weight_decay"]
+                        u = update.reshape(p.shape)
+                        mask = (u * p).ge(0)
+                        p.add_(p * mask, alpha=-lr * wd)
                     p.add_(update.reshape(p.shape), alpha=-group["lr"])
             else:
                 for p in group["params"]:
@@ -122,7 +130,11 @@ class SingleDeviceNorMuonWithAuxAdam(torch.optim.Optimizer):
                     update = adam_update(p.grad, state["exp_avg"], state["exp_avg_sq"],
                                          state["step"], group["betas"], group["eps"])
                     if group["weight_decay"] and had_grad:
-                        p.mul_(1 - group["lr"] * group["weight_decay"])
+                        # Cautious Weight Decay
+                        lr = group["lr"]
+                        wd = group["weight_decay"]
+                        mask = (update * p).ge(0)
+                        p.add_(p * mask, alpha=-lr * wd)
                     p.add_(update, alpha=-group["lr"])
 
         return loss
