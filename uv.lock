@@ -897,11 +897,6 @@ wheels = [
 ]
 
 [[package]]
-name = "muon-optimizer"
-version = "0.1.0"
-source = { git = "https://github.com/KellerJordan/Muon#857d1adc159e098212f828d927460782d3da59e9" }
-
-[[package]]
 name = "networkx"
 version = "3.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1489,7 +1484,6 @@ source = { editable = "." }
 dependencies = [
     { name = "datasets" },
     { name = "maturin" },
-    { name = "muon-optimizer" },
     { name = "pyarrow" },
     { name = "tiktoken" },
     { name = "torch" },
@@ -1508,7 +1502,6 @@ gpu = [
 requires-dist = [
     { name = "datasets", specifier = ">=4.4.1" },
     { name = "maturin", specifier = ">=1.10.2" },
-    { name = "muon-optimizer", git = "https://github.com/KellerJordan/Muon" },
     { name = "pyarrow", specifier = ">=22.0.0" },
     { name = "tiktoken", specifier = ">=0.12.0" },
     { name = "torch", specifier = ">=2.4,<2.5" },
