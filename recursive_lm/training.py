@@ -14,13 +14,19 @@ def get_linear_schedule_with_warmup(
     optimizer: torch.optim.Optimizer,
     num_warmup_steps: int,
     num_training_steps: int,
+    min_lrs: list[float],
     last_epoch: int = -1,
 ):
+    base_lrs = [group["lr"] for group in optimizer.param_groups]
+    end_factors = [
+        (min_lr / lr) if lr > 0 else 1.0
+        for lr, min_lr in zip(base_lrs, min_lrs, strict=True)
+    ]
     if num_warmup_steps <= 0:
         return torch.optim.lr_scheduler.LinearLR(
             optimizer,
             start_factor=1.0,
-            end_factor=0.0,
+            end_factor=end_factors,
             total_iters=max(1, num_training_steps),
             last_epoch=last_epoch,
         )
@@ -35,7 +41,7 @@ def get_linear_schedule_with_warmup(
     decay = torch.optim.lr_scheduler.LinearLR(
         optimizer,
         start_factor=1.0,
-        end_factor=0.0,
+        end_factor=end_factors,
         total_iters=max(1, num_training_steps - num_warmup_steps),
         last_epoch=last_epoch,
     )
@@ -66,6 +72,8 @@ class TrainingConfig:
     max_tok_count: int = 130300589 # 130.3M default max tok count, 16000 microbatches, 2000 updates per epoch
     epoch: int = 10 # 10 epochs by default
     warmup_steps: int = 0
+    min_lr_embed: float = 0.0
+    min_lr_block: float = 0.0
     use_wandb: bool = False
     wandb_project: str = "recursive-lm"
     run_name: str | None = None
@@ -126,6 +134,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         opt,
         num_warmup_steps=train_config.warmup_steps,
         num_training_steps=total_steps,
+        min_lrs=[train_config.min_lr_embed, train_config.min_lr_block],
     )
     wandb_run = None
     if train_config.use_wandb:
