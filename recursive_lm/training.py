@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from muon import MuonWithAuxAdam
+from .optimizer import SingleDeviceNorMuonWithAuxAdam
 from .model import RecursiveGPT, ModelConfig
 from .dataloader import batch_iterator
 from .common import get_base_dir
@@ -105,7 +105,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         block_params += list(model.recursive_block.attn.Wo.parameters())
         block_params += list(model.recursive_block.mlp.parameters())
 
-    opt = MuonWithAuxAdam(
+    opt = SingleDeviceNorMuonWithAuxAdam(
         [
             {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
             {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": train_config.wd_muon},
