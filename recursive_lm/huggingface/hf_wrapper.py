@@ -36,9 +36,9 @@ class RecursiveLMConfig(PretrainedConfig):
         auto_map = kwargs.pop(
             "auto_map",
             {
-                "AutoConfig": "recursive_lm.huggingface.hf_wrapper.RecursiveLMConfig",
-                "AutoModelForCausalLM": "recursive_lm.huggingface.hf_wrapper.RecursiveLMForCausalLM",
-                "AutoTokenizer": "recursive_lm.huggingface.hf_tokenizer.RecursiveLMTokenizer",
+                "AutoConfig": "hf_wrapper.RecursiveLMConfig",
+                "AutoModelForCausalLM": "hf_wrapper.RecursiveLMForCausalLM",
+                "AutoTokenizer": "hf_tokenizer.RecursiveLMTokenizer",
             },
         )
         super().__init__(**kwargs)

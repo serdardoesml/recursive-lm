@@ -26,7 +26,7 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
         pad_token = kwargs.pop("pad_token", bos_token)
         auto_map = kwargs.pop(
             "auto_map",
-            {"AutoTokenizer": "recursive_lm.huggingface.hf_tokenizer.RecursiveLMTokenizer"},
+            {"AutoTokenizer": "hf_tokenizer.RecursiveLMTokenizer"},
         )
         super().__init__(
             bos_token=bos_token,

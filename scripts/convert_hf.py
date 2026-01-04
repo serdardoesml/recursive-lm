@@ -1,6 +1,8 @@
 """Convert a RecursiveGPT checkpoint into a Hugging Face folder."""
 
 import argparse
+import shutil
+from pathlib import Path
 
 from recursive_lm.common import get_base_dir
 from recursive_lm.huggingface.hf_tokenizer import RecursiveLMTokenizer
@@ -28,6 +30,10 @@ def main():
         raise FileNotFoundError(f"Tokenizer file not found: {tok_path}")
     tokenizer = RecursiveLMTokenizer(tokenizer_file=str(tok_path))
     tokenizer.save_pretrained(str(out_dir))
+
+    hf_dir = Path(__file__).resolve().parents[1] / "recursive_lm" / "huggingface"
+    shutil.copyfile(hf_dir / "hf_wrapper.py", out_dir / "hf_wrapper.py")
+    shutil.copyfile(hf_dir / "hf_tokenizer.py", out_dir / "hf_tokenizer.py")
     print(f"Saved Hugging Face model to {out_dir}")
 
 
