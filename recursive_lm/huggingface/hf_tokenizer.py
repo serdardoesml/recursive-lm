@@ -6,6 +6,7 @@ Requires uv group 'hf'.
 from __future__ import annotations
 
 from typing import Optional
+import os
 
 from transformers import PreTrainedTokenizer # type: ignore
 from transformers.utils.hub import cached_file # type: ignore
