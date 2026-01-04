@@ -14,11 +14,11 @@ class ModelConfig:
     sequence_len: int = 256
     vocab_size: int = 32768
     n_head: int = 16 # number of attention heads
-    n_hidden: int = 1024
+    n_hidden: int = 384
     n_wembed: int = 128
-    mlp_mul: int = 8
-    rec_depth: int = 4
-    tie_embed: bool = True
+    mlp_mul: int = 16
+    rec_depth: int = 24
+    tie_embed: bool = False # Tied embeddings greatly hurt performance on recursive mode
     rope_cache_len: int = 16384
 
     # Standard gpt experimental mode to compare with non-recursive models

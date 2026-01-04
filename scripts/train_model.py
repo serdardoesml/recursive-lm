@@ -1,9 +1,6 @@
 import argparse
 import os
 
-import torch
-import torch.distributed as dist
-
 from recursive_lm.common import get_base_dir
 from recursive_lm.model import ModelConfig
 from recursive_lm.training import TrainingConfig, train
@@ -24,8 +21,8 @@ parser.add_argument("--epoch", type=int, default=TrainingConfig.epoch)
 parser.add_argument("--warmup_steps", type=int, default=TrainingConfig.warmup_steps)
 parser.add_argument("--wandb", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--wandb_project", type=str, default=TrainingConfig.wandb_project)
-parser.add_argument("--run_name", type=str, default="")
-parser.add_argument("--grad_clip", type=str, choices=["true", "false"], default="true")
+parser.add_argument("--run_name", type=str, default=TrainingConfig.run_name)
+parser.add_argument("--grad_clip", type=str, choices=["true", "false"], default=TrainingConfig.grad_clip)
 parser.add_argument("--max_grad_norm", type=float, default=TrainingConfig.max_grad_norm)
 
 parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
@@ -35,7 +32,7 @@ parser.add_argument("--n_hidden", type=int, default=ModelConfig.n_hidden)
 parser.add_argument("--n_wembed", type=int, default=ModelConfig.n_wembed)
 parser.add_argument("--mlp_mul", type=int, default=ModelConfig.mlp_mul)
 parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
-parser.add_argument("--tie_embed", type=str, choices=["true", "false"], default="true")
+parser.add_argument("--tie_embed", type=str, choices=["true", "false"], default=ModelConfig.tie_embed)
 parser.add_argument("--standard_gpt", type=str, choices=["true", "false"], default="false") # For experiments
 parser.add_argument("--grad_checkpointing", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--save", type=str, choices=["true", "false"], default="true")

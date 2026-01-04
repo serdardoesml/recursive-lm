@@ -67,16 +67,17 @@ class TrainingConfig:
     microbatch_tok: int = 32768
     grad_acc: int = 2
 
-    max_tok_count: int = 130300589 # 130.3M default max tok count, 16000 microbatches, 2000 updates per epoch
+    # 130.3M default max tok count, 4000 microbatches, 2000 updates per epoch
+    max_tok_count: int = 130300589 # Update when changing dataset or tokenizer
     epoch: int = 10 # 10 epochs by default
-    warmup_steps: int = 0
+    warmup_steps: int = 50
     min_lr_embed: float = 0.0
     min_lr_block: float = 0.0
     use_wandb: bool = False
     wandb_project: str = "recursive-lm"
-    run_name: str | None = None
+    run_name: str = "rec-d24-small"
     grad_clip: bool = True
-    max_grad_norm: float = 1.0
+    max_grad_norm: float = 2.0
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
     model = RecursiveGPT(
