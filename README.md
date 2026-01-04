@@ -28,4 +28,4 @@ Train model with (Requires uv group 'gpu'):
 python -m scripts.train_model --dataset climbmix100Mwords.parquet
 
 Convert to hf with (Requires uv group 'hf'):
-python -m scripts.convert_hf --model model_name.pth
+python -m scripts.convert_hf model_name.pth --tokenizer tokenizer_name.pkl

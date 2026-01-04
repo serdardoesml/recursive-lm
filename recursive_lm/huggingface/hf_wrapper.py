@@ -36,8 +36,9 @@ class RecursiveLMConfig(PretrainedConfig):
         auto_map = kwargs.pop(
             "auto_map",
             {
-                "AutoConfig": "recursive_lm.hf_wrapper.RecursiveLMConfig",
-                "AutoModelForCausalLM": "recursive_lm.hf_wrapper.RecursiveLMForCausalLM",
+                "AutoConfig": "recursive_lm.huggingface.hf_wrapper.RecursiveLMConfig",
+                "AutoModelForCausalLM": "recursive_lm.huggingface.hf_wrapper.RecursiveLMForCausalLM",
+                "AutoTokenizer": "recursive_lm.huggingface.hf_tokenizer.RecursiveLMTokenizer",
             },
         )
         super().__init__(**kwargs)
@@ -184,9 +185,12 @@ def convert_checkpoint(pth_path: str, out_dir: str) -> str:
 
 
 try:
-    from transformers import AutoConfig, AutoModelForCausalLM # type: ignore
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer # type: ignore
+
+    from recursive_lm.huggingface.hf_tokenizer import RecursiveLMTokenizer
 
     AutoConfig.register(RecursiveLMConfig.model_type, RecursiveLMConfig)
     AutoModelForCausalLM.register(RecursiveLMConfig, RecursiveLMForCausalLM)
+    AutoTokenizer.register(RecursiveLMConfig, RecursiveLMTokenizer)
 except Exception:
     pass
