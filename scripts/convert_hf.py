@@ -1,12 +1,10 @@
 """Convert a RecursiveGPT checkpoint into a Hugging Face folder."""
 
 import argparse
-import json
 import shutil
 from pathlib import Path
 
 from recursive_lm.common import get_base_dir
-from recursive_lm.huggingface.hf_processor import RecursiveLMProcessor
 from recursive_lm.huggingface.hf_tokenizer import RecursiveLMTokenizer
 from recursive_lm.huggingface.hf_wrapper import convert_checkpoint
 
@@ -26,21 +24,14 @@ def main():
     out_root.mkdir(parents=True, exist_ok=True)
     out_dir = out_root / model_path.stem
     convert_checkpoint(str(model_path), str(out_dir))
+    (out_dir / "processor_config.json").unlink(missing_ok=True)
+    (out_dir / "hf_processor.py").unlink(missing_ok=True)
 
     tok_path = base_dir / "tokenizers" / args.tokenizer
     if not tok_path.is_file():
         raise FileNotFoundError(f"Tokenizer file not found: {tok_path}")
     tokenizer = RecursiveLMTokenizer(tokenizer_file=str(tok_path))
-    processor = RecursiveLMProcessor(tokenizer)
-    processor.save_pretrained(str(out_dir))
-
-    config_path = out_dir / "config.json"
-    with config_path.open("r", encoding="utf-8") as f:
-        config_data = json.load(f)
-    config_data["bos_token_id"] = tokenizer.bos_token_id
-    config_data["pad_token_id"] = tokenizer.pad_token_id
-    with config_path.open("w", encoding="utf-8") as f:
-        json.dump(config_data, f, indent=2)
+    tokenizer.save_pretrained(str(out_dir))
 
     generation_config_path = out_dir / "generation_config.json"
     generation_config = {
@@ -53,7 +44,6 @@ def main():
     hf_dir = Path(__file__).resolve().parents[1] / "recursive_lm" / "huggingface"
     shutil.copyfile(hf_dir / "hf_wrapper.py", out_dir / "hf_wrapper.py")
     shutil.copyfile(hf_dir / "hf_tokenizer.py", out_dir / "hf_tokenizer.py")
-    shutil.copyfile(hf_dir / "hf_processor.py", out_dir / "hf_processor.py")
     print(f"Saved Hugging Face model to {out_dir}")
 
 
