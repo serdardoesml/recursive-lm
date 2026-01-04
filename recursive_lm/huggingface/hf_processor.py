@@ -13,5 +13,5 @@ class RecursiveLMProcessor(ProcessorMixin):
     tokenizer_class = "RecursiveLMTokenizer"
 
     def __init__(self, tokenizer, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(tokenizer=tokenizer, **kwargs)
         self.tokenizer = tokenizer
