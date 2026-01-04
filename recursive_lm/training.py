@@ -5,7 +5,7 @@ from .model import RecursiveGPT, ModelConfig
 from .dataloader import batch_iterator
 from .common import get_base_dir
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime
 import os
 import time
@@ -230,4 +230,10 @@ def save_model(model, run_name: str | None):
         filename = f"model_{timestamp}.pth"
     path = os.path.join(get_base_dir(), "models", filename)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    torch.save(model.state_dict(), path)
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "config": asdict(model.config),
+        },
+        path,
+    )

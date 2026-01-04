@@ -19,6 +19,7 @@ class ModelConfig:
     mlp_mul: int = 8
     rec_depth: int = 4
     tie_embed: bool = True
+    rope_cache_len: int = 16384
 
     # Standard gpt experimental mode to compare with non-recursive models
     standard_gpt: bool = False
@@ -190,7 +191,7 @@ class RecursiveGPT(nn.Module):
         assert config.n_hidden % config.n_head == 0
 
         # We build cache then register it as a buffer later to ensure it gets moved to device together with the model
-        cos_cache, sin_cache = RecursiveGPT.build_rope_cache(config.sequence_len, config.n_headdim)
+        cos_cache, sin_cache = RecursiveGPT.build_rope_cache(config.rope_cache_len, config.n_headdim)
 
         # Factorized Embeddings (https://arxiv.org/pdf/1909.11942)
         self.embedding = nn.Embedding(config.vocab_size, config.n_wembed)

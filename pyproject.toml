@@ -20,6 +20,9 @@ gpu = [
 analysis = [
   "matplotlib",
 ]
+hf = [
+  "transformers",
+]
 
 [build-system]
 requires = ["maturin>=1.7,<2.0"]

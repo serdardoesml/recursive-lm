@@ -1,4 +1,7 @@
-"""Quick vibecoded tool to test the base model. Can only run on gpu."""
+"""
+Quick vibecoded tool to test the base model and do some analysis. Can only run on gpu.
+Analysis mode requires uv group 'analysis'.
+"""
 
 import argparse
 import os
@@ -11,7 +14,6 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
-import matplotlib.pyplot as plt
 
 from recursive_lm.common import get_base_dir
 from recursive_lm.model import ModelConfig, RecursiveGPT
@@ -35,8 +37,6 @@ def main():
         default=None,
         help="Optional output stem (no extension) under analysis/; defaults to auto timestamped name",
     )
-    parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
-    parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
     args = parser.parse_args()
 
     base_dir = get_base_dir()
@@ -44,47 +44,11 @@ def main():
     tokenizer_path = os.path.join(base_dir, "tokenizers", args.tokenizer)
 
     tokenizer = RustBPETokenizer.load_from_dir(tokenizer_path)
-    state = torch.load(model_path, map_location="cpu", weights_only=True)
-    tie_embed = "lm_head.weight" not in state
-    standard_gpt = any(k.startswith("blocks.") for k in state.keys())
-    if standard_gpt:
-        block_indices = []
-        for key in state.keys():
-            if key.startswith("blocks."):
-                parts = key.split(".")
-                if len(parts) > 1 and parts[1].isdigit():
-                    block_indices.append(int(parts[1]))
-        if block_indices:
-            inferred_rec_depth = max(block_indices) + 1
-        else:
-            raise ValueError("Could not infer rec_depth from blocks in checkpoint.")
-    else:
-        if "rec_layer_embedding.weight" not in state:
-            raise ValueError("Checkpoint missing rec_layer_embedding.weight for rec_depth inference.")
-        inferred_rec_depth = state["rec_layer_embedding.weight"].shape[0]
-    embed_w = state["embedding.weight"]
-    vocab_size, embed_dim = embed_w.shape
-    if "e_to_h.weight" in state:
-        n_hidden, n_wembed = state["e_to_h.weight"].shape
-    else:
-        n_hidden = embed_dim
-        n_wembed = embed_dim
-    if standard_gpt:
-        mlp_key = "blocks.0.mlp.c_fc.weight"
-    else:
-        mlp_key = "recursive_block.mlp.c_fc.weight"
-    mlp_mul = state[mlp_key].shape[0] // n_hidden
-    config = ModelConfig(
-        sequence_len=args.sequence_len,
-        vocab_size=vocab_size,
-        n_head=args.n_head,
-        n_hidden=n_hidden,
-        n_wembed=n_wembed,
-        mlp_mul=mlp_mul,
-        rec_depth=inferred_rec_depth,
-        tie_embed=tie_embed,
-        standard_gpt=standard_gpt,
-    )
+    checkpoint = torch.load(model_path, map_location="cpu")
+    if not isinstance(checkpoint, dict) or "state_dict" not in checkpoint or "config" not in checkpoint:
+        raise ValueError("Checkpoint is missing config/state_dict; re-save with the updated trainer.")
+    state = checkpoint["state_dict"]
+    config = ModelConfig(**checkpoint["config"])
     model = RecursiveGPT(config)
     device = "cuda" # Cuda is required due to flash-attn
     model.load_state_dict(state)
@@ -258,6 +222,8 @@ def main():
         # In analysis mode we run exactly one next-token prediction, capture per-step metrics,
         # save them to analysis/, print a short summary, and return.
         if args.analysis and analyzer is not None:
+            import matplotlib.pyplot as plt # type: ignore
+
             analyzer.reset()
 
             ctx = tokens[-config.sequence_len:]
