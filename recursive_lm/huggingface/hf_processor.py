@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-from importlib.util import module_from_spec, spec_from_file_location
 
 
 class RecursiveLMProcessor:
@@ -21,20 +19,6 @@ class RecursiveLMProcessor:
     def __call__(self, *args, **kwargs):
         return self.tokenizer(*args, **kwargs)
 
-    @staticmethod
-    def _load_tokenizer_module():
-        module_name = "hf_tokenizer"
-        if module_name in sys.modules:
-            return sys.modules[module_name]
-        module_path = os.path.join(os.path.dirname(__file__), "hf_tokenizer.py")
-        spec = spec_from_file_location(module_name, module_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Could not load module from {module_path}")
-        module = module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        return module
-
     @classmethod
     def register_for_auto_class(cls, auto_class: str = "AutoProcessor"):
         cls._auto_class = auto_class
@@ -42,11 +26,17 @@ class RecursiveLMProcessor:
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: str, **kwargs):
-        tokenizer_module = cls._load_tokenizer_module()
-        tokenizer = tokenizer_module.RecursiveLMTokenizer.from_pretrained(
+        from transformers.dynamic_module_utils import get_class_from_dynamic_module # type: ignore
+
+        tokenizer_cls = get_class_from_dynamic_module(
+            "hf_tokenizer.RecursiveLMTokenizer",
             pretrained_model_name_or_path,
-            **kwargs,
+            cache_dir=kwargs.get("cache_dir"),
+            revision=kwargs.get("revision"),
+            token=kwargs.get("token"),
+            local_files_only=kwargs.get("local_files_only", False),
         )
+        tokenizer = tokenizer_cls.from_pretrained(pretrained_model_name_or_path, **kwargs)
         return cls(tokenizer)
 
     def save_pretrained(self, save_directory: str, **kwargs):
