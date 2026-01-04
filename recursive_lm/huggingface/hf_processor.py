@@ -20,6 +20,11 @@ class RecursiveLMProcessor:
         return self.tokenizer(*args, **kwargs)
 
     @classmethod
+    def register_for_auto_class(cls, auto_class: str = "AutoProcessor"):
+        cls._auto_class = auto_class
+        return cls
+
+    @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: str, **kwargs):
         from recursive_lm.huggingface.hf_tokenizer import RecursiveLMTokenizer
 
