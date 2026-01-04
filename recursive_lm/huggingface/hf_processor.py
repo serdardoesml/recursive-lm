@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from importlib import import_module
 
 
 class RecursiveLMProcessor:
@@ -26,9 +27,11 @@ class RecursiveLMProcessor:
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: str, **kwargs):
-        from recursive_lm.huggingface.hf_tokenizer import RecursiveLMTokenizer
-
-        tokenizer = RecursiveLMTokenizer.from_pretrained(pretrained_model_name_or_path, **kwargs)
+        tokenizer_module = import_module("hf_tokenizer")
+        tokenizer = tokenizer_module.RecursiveLMTokenizer.from_pretrained(
+            pretrained_model_name_or_path,
+            **kwargs,
+        )
         return cls(tokenizer)
 
     def save_pretrained(self, save_directory: str, **kwargs):

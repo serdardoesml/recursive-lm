@@ -18,6 +18,8 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
     model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(self, tokenizer_file: str, **kwargs):
+        if tokenizer_file is None:
+            raise ValueError("tokenizer_file is required.")
         self._tokenizer = RustBPETokenizer.load_from_dir(tokenizer_file)
         self._vocab: Optional[dict[str, int]] = None
 
@@ -35,6 +37,7 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
             auto_map=auto_map,
             **kwargs,
         )
+
 
     @property
     def vocab_size(self) -> int:

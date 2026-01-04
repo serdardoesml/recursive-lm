@@ -31,35 +31,16 @@ def main():
     if not tok_path.is_file():
         raise FileNotFoundError(f"Tokenizer file not found: {tok_path}")
     tokenizer = RecursiveLMTokenizer(tokenizer_file=str(tok_path))
-    tokenizer.save_pretrained(str(out_dir))
     processor = RecursiveLMProcessor(tokenizer)
     processor.save_pretrained(str(out_dir))
-    processor_config_path = out_dir / "processor_config.json"
-    processor_config = {
-        "processor_class": "RecursiveLMProcessor",
-        "tokenizer_class": "RecursiveLMTokenizer",
-        "auto_map": {"AutoProcessor": "hf_processor.RecursiveLMProcessor"},
-    }
-    if processor_config_path.is_file():
-        with processor_config_path.open("r", encoding="utf-8") as f:
-            existing = json.load(f)
-        existing.update(processor_config)
-        processor_config = existing
-    with processor_config_path.open("w", encoding="utf-8") as f:
-        json.dump(processor_config, f, indent=2)
 
     config_path = out_dir / "config.json"
-    if config_path.is_file():
-        with config_path.open("r", encoding="utf-8") as f:
-            config_data = json.load(f)
-        config_data.setdefault("bos_token_id", tokenizer.bos_token_id)
-        config_data.setdefault("pad_token_id", tokenizer.pad_token_id)
-        config_data.setdefault("processor_class", "RecursiveLMProcessor")
-        auto_map = config_data.get("auto_map") or {}
-        auto_map.setdefault("AutoProcessor", "hf_processor.RecursiveLMProcessor")
-        config_data["auto_map"] = auto_map
-        with config_path.open("w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=2)
+    with config_path.open("r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    config_data["bos_token_id"] = tokenizer.bos_token_id
+    config_data["pad_token_id"] = tokenizer.pad_token_id
+    with config_path.open("w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=2)
 
     generation_config_path = out_dir / "generation_config.json"
     generation_config = {
