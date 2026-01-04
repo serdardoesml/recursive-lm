@@ -5,10 +5,10 @@ Requires uv group 'hf'.
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 from transformers import PreTrainedTokenizer # type: ignore
+from transformers.utils.hub import cached_file # type: ignore
 
 from recursive_lm.tokenizer import RustBPETokenizer, SPECIAL_TOKENS
 
@@ -49,6 +49,20 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
     def register_for_auto_class(cls, auto_class: str = "AutoProcessor"):
         cls._auto_class = auto_class
         return cls
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path: str, *init_inputs, **kwargs):
+        if kwargs.get("tokenizer_file") is None:
+            kwargs["tokenizer_file"] = cached_file(
+                pretrained_model_name_or_path,
+                cls.vocab_files_names["tokenizer_file"],
+                cache_dir=kwargs.get("cache_dir"),
+                revision=kwargs.get("revision"),
+                token=kwargs.get("token") or kwargs.get("use_auth_token"),
+                local_files_only=kwargs.get("local_files_only", False),
+                subfolder=kwargs.get("subfolder", ""),
+            )
+        return super().from_pretrained(pretrained_model_name_or_path, *init_inputs, **kwargs)
 
 
     @property
