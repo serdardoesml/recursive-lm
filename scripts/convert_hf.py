@@ -2,6 +2,7 @@
 
 import argparse
 import shutil
+import json
 from pathlib import Path
 
 from recursive_lm.common import get_base_dir
