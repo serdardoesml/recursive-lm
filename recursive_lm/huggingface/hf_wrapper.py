@@ -39,6 +39,7 @@ class RecursiveLMConfig(PretrainedConfig):
                 "AutoConfig": "hf_wrapper.RecursiveLMConfig",
                 "AutoModelForCausalLM": "hf_wrapper.RecursiveLMForCausalLM",
                 "AutoTokenizer": "hf_tokenizer.RecursiveLMTokenizer",
+                "AutoProcessor": "hf_processor.RecursiveLMProcessor",
             },
         )
         super().__init__(**kwargs)
