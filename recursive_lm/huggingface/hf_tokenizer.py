@@ -65,6 +65,73 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
             )
         return super().from_pretrained(pretrained_model_name_or_path, *init_inputs, **kwargs)
 
+    def __call__(self, text, text_pair=None, **kwargs):
+        return_offsets_mapping = kwargs.pop("return_offsets_mapping", False)
+        return_offsets_mapping = kwargs.pop("return_offset_mapping", return_offsets_mapping)
+        if not return_offsets_mapping:
+            return super().__call__(text, text_pair=text_pair, **kwargs)
+
+        kwargs["return_offsets_mapping"] = False
+        kwargs.setdefault("return_token_type_ids", True)
+        enc = super().__call__(text, text_pair=text_pair, **kwargs)
+        enc["offset_mapping"] = self._build_offset_mapping(
+            text,
+            text_pair,
+            enc["input_ids"],
+            enc.get("token_type_ids"),
+        )
+        return enc
+
+    def _offsets_for_text(self, text: str) -> list[tuple[int, int]]:
+        token_ids = self._tokenizer.enc.encode_ordinary(text)
+        offsets: list[tuple[int, int]] = []
+        idx = 0
+        for token_id in token_ids:
+            token_text = self._tokenizer.enc.decode([token_id])
+            start = idx
+            end = start + len(token_text)
+            offsets.append((start, end))
+            idx = end
+        return offsets
+
+    def _build_offset_mapping(self, text, text_pair, input_ids, token_type_ids):
+        if hasattr(input_ids, "tolist"):
+            input_ids = input_ids.tolist()
+        if hasattr(token_type_ids, "tolist"):
+            token_type_ids = token_type_ids.tolist()
+        if isinstance(text, str):
+            return self._build_offset_mapping_single(text, text_pair, input_ids, token_type_ids)
+        if text_pair is None:
+            text_pair = [None] * len(text)
+        if token_type_ids is None:
+            token_type_ids = [None] * len(input_ids)
+        return [
+            self._build_offset_mapping_single(t, tp, ids, tti)
+            for t, tp, ids, tti in zip(text, text_pair, input_ids, token_type_ids)
+        ]
+
+    def _build_offset_mapping_single(self, text, text_pair, input_ids, token_type_ids):
+        if hasattr(input_ids, "tolist"):
+            input_ids = input_ids.tolist()
+        if hasattr(token_type_ids, "tolist"):
+            token_type_ids = token_type_ids.tolist()
+        offsets_a = self._offsets_for_text(text)
+        offsets_b = self._offsets_for_text(text_pair) if text_pair is not None else []
+        idx_a = 0
+        idx_b = 0
+        out = []
+        for i, token_id in enumerate(input_ids):
+            if token_id in self.all_special_ids:
+                out.append((0, 0))
+                continue
+            if token_type_ids is not None and token_type_ids[i] == 1:
+                out.append(offsets_b[idx_b])
+                idx_b += 1
+            else:
+                out.append(offsets_a[idx_a])
+                idx_a += 1
+        return out
+
 
     @property
     def vocab_size(self) -> int:
