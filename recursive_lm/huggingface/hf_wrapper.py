@@ -140,7 +140,11 @@ class RecursiveLMForCausalLM(PreTrainedModel):
                 dtype=self.model.embedding.weight.dtype,
             )
         else:
-            logits_flat = self.model(flat_input, cu_seqlens, position_ids)
+            if device.type == "cuda":
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    logits_flat = self.model(flat_input, cu_seqlens, position_ids)
+            else:
+                logits_flat = self.model(flat_input, cu_seqlens, position_ids)
             logits = torch.zeros(
                 (batch_size, seq_len, logits_flat.shape[-1]),
                 device=device,
