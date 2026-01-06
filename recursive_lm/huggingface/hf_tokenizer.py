@@ -9,6 +9,7 @@ from typing import Optional
 import os
 
 from transformers import PreTrainedTokenizer # type: ignore
+from transformers.tokenization_utils_base import BatchEncoding # type: ignore
 from transformers.utils.hub import cached_file # type: ignore
 
 from recursive_lm.tokenizer import RustBPETokenizer, SPECIAL_TOKENS
@@ -68,19 +69,96 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
     def __call__(self, text, text_pair=None, **kwargs):
         return_offsets_mapping = kwargs.pop("return_offsets_mapping", False)
         return_offsets_mapping = kwargs.pop("return_offset_mapping", return_offsets_mapping)
-        if not return_offsets_mapping:
-            return super().__call__(text, text_pair=text_pair, **kwargs)
+        return_tensors = kwargs.pop("return_tensors", None)
+        padding = kwargs.pop("padding", False)
+        truncation = kwargs.pop("truncation", False)
+        max_length = kwargs.pop("max_length", None)
+        return_attention_mask = kwargs.pop("return_attention_mask", True)
+        return_token_type_ids = kwargs.pop("return_token_type_ids", False)
 
-        kwargs["return_offsets_mapping"] = False
-        kwargs.setdefault("return_token_type_ids", True)
-        enc = super().__call__(text, text_pair=text_pair, **kwargs)
-        enc["offset_mapping"] = self._build_offset_mapping(
-            text,
-            text_pair,
-            enc["input_ids"],
-            enc.get("token_type_ids"),
-        )
-        return enc
+        pairs: list[tuple[str, str | None]]
+        if isinstance(text, (list, tuple)):
+            if text_pair is None and text and isinstance(text[0], (list, tuple)):
+                pairs = [(a, b) for a, b in text]
+            elif text_pair is not None:
+                pairs = list(zip(text, text_pair))
+            else:
+                pairs = [(t, None) for t in text]
+        else:
+            pairs = [(text, text_pair)]
+
+        input_ids_batch = []
+        token_type_ids_batch = []
+        offsets_batch = []
+
+        for a, b in pairs:
+            ids_a = self._tokenizer.encode(a) if a is not None else []
+            ids_b = self._tokenizer.encode(b) if b is not None else []
+            input_ids = ids_a + ids_b
+            token_type_ids = [0] * len(ids_a) + [1] * len(ids_b)
+
+            offsets = None
+            if return_offsets_mapping:
+                offsets_a = self._offsets_for_text(a) if a is not None else []
+                offsets_b = self._offsets_for_text(b) if b is not None else []
+                offsets = offsets_a + offsets_b
+
+            if truncation and max_length is not None and len(input_ids) > max_length:
+                if self.truncation_side == "left":
+                    start = len(input_ids) - max_length
+                    input_ids = input_ids[start:]
+                    token_type_ids = token_type_ids[start:]
+                    if offsets is not None:
+                        offsets = offsets[start:]
+                else:
+                    input_ids = input_ids[:max_length]
+                    token_type_ids = token_type_ids[:max_length]
+                    if offsets is not None:
+                        offsets = offsets[:max_length]
+
+            input_ids_batch.append(input_ids)
+            token_type_ids_batch.append(token_type_ids)
+            if return_offsets_mapping:
+                offsets_batch.append(offsets if offsets is not None else [])
+
+        pad_to_length = None
+        if padding is True or padding == "longest":
+            pad_to_length = max(len(ids) for ids in input_ids_batch) if input_ids_batch else 0
+        elif padding == "max_length":
+            pad_to_length = max_length
+
+        attention_mask_batch = []
+        if pad_to_length is not None:
+            pad_id = self.pad_token_id if self.pad_token_id is not None else 0
+            for i, ids in enumerate(input_ids_batch):
+                pad_len = pad_to_length - len(ids)
+                if pad_len < 0:
+                    pad_len = 0
+                if self.padding_side == "left":
+                    input_ids_batch[i] = [pad_id] * pad_len + ids
+                    token_type_ids_batch[i] = [0] * pad_len + token_type_ids_batch[i]
+                    if return_offsets_mapping:
+                        offsets_batch[i] = [(0, 0)] * pad_len + offsets_batch[i]
+                    attn = [0] * pad_len + [1] * len(ids)
+                else:
+                    input_ids_batch[i] = ids + [pad_id] * pad_len
+                    token_type_ids_batch[i] = token_type_ids_batch[i] + [0] * pad_len
+                    if return_offsets_mapping:
+                        offsets_batch[i] = offsets_batch[i] + [(0, 0)] * pad_len
+                    attn = [1] * len(ids) + [0] * pad_len
+                attention_mask_batch.append(attn)
+        else:
+            attention_mask_batch = [[1] * len(ids) for ids in input_ids_batch]
+
+        enc = {"input_ids": input_ids_batch}
+        if return_attention_mask:
+            enc["attention_mask"] = attention_mask_batch
+        if return_token_type_ids:
+            enc["token_type_ids"] = token_type_ids_batch
+        if return_offsets_mapping:
+            enc["offset_mapping"] = offsets_batch
+
+        return BatchEncoding(enc, tensor_type=return_tensors)
 
     def _offsets_for_text(self, text: str) -> list[tuple[int, int]]:
         token_ids = self._tokenizer.enc.encode_ordinary(text)
@@ -93,45 +171,6 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
             offsets.append((start, end))
             idx = end
         return offsets
-
-    def _build_offset_mapping(self, text, text_pair, input_ids, token_type_ids):
-        if hasattr(input_ids, "tolist"):
-            input_ids = input_ids.tolist()
-        if hasattr(token_type_ids, "tolist"):
-            token_type_ids = token_type_ids.tolist()
-        if isinstance(text, str):
-            return self._build_offset_mapping_single(text, text_pair, input_ids, token_type_ids)
-        if text_pair is None:
-            text_pair = [None] * len(text)
-        if token_type_ids is None:
-            token_type_ids = [None] * len(input_ids)
-        return [
-            self._build_offset_mapping_single(t, tp, ids, tti)
-            for t, tp, ids, tti in zip(text, text_pair, input_ids, token_type_ids)
-        ]
-
-    def _build_offset_mapping_single(self, text, text_pair, input_ids, token_type_ids):
-        if hasattr(input_ids, "tolist"):
-            input_ids = input_ids.tolist()
-        if hasattr(token_type_ids, "tolist"):
-            token_type_ids = token_type_ids.tolist()
-        offsets_a = self._offsets_for_text(text)
-        offsets_b = self._offsets_for_text(text_pair) if text_pair is not None else []
-        idx_a = 0
-        idx_b = 0
-        out = []
-        for i, token_id in enumerate(input_ids):
-            if token_id in self.all_special_ids:
-                out.append((0, 0))
-                continue
-            if token_type_ids is not None and token_type_ids[i] == 1:
-                out.append(offsets_b[idx_b])
-                idx_b += 1
-            else:
-                out.append(offsets_a[idx_a])
-                idx_a += 1
-        return out
-
 
     @property
     def vocab_size(self) -> int:
