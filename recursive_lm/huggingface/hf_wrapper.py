@@ -11,7 +11,7 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 from transformers import PretrainedConfig, PreTrainedModel # type: ignore
-from transformers.modeling_outputs import CausalLMOutputWithPast # type: ignore
+from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast # type: ignore
 
 from recursive_lm.model import ModelConfig, RecursiveGPT
 
@@ -37,6 +37,7 @@ class RecursiveLMConfig(PretrainedConfig):
             "auto_map",
             {
                 "AutoConfig": "hf_wrapper.RecursiveLMConfig",
+                "AutoModel": "hf_wrapper.RecursiveLMModel",
                 "AutoModelForCausalLM": "hf_wrapper.RecursiveLMForCausalLM",
                 "AutoTokenizer": "hf_tokenizer.RecursiveLMTokenizer",
                 "AutoProcessor": "hf_tokenizer.RecursiveLMTokenizer",
@@ -55,6 +56,7 @@ class RecursiveLMConfig(PretrainedConfig):
         self.standard_gpt = standard_gpt
         self.auto_map = auto_map
         self.tie_word_embeddings = tie_embed
+        self.hidden_size = self.n_hidden
 
     def to_model_config(self) -> ModelConfig:
         return ModelConfig(
@@ -171,6 +173,92 @@ class RecursiveLMForCausalLM(PreTrainedModel):
         return CausalLMOutputWithPast(loss=loss, logits=logits)
 
 
+class RecursiveLMModel(PreTrainedModel):
+    config_class = RecursiveLMConfig
+    base_model_prefix = "model"
+
+    def __init__(self, config: RecursiveLMConfig):
+        super().__init__(config)
+        self.model = RecursiveGPT(config.to_model_config())
+
+    def init_weights(self):
+        return
+
+    def get_input_embeddings(self):
+        return self.model.embedding
+
+    def set_input_embeddings(self, value):
+        self.model.embedding = value
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> BaseModelOutputWithPast:
+        if input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(0)
+            if attention_mask is not None and attention_mask.dim() == 1:
+                attention_mask = attention_mask.unsqueeze(0)
+
+        if attention_mask is not None and attention_mask.dim() == 3:
+            attention_mask = attention_mask[:, -1]
+
+        batch_size, seq_len = input_ids.shape
+        device = input_ids.device
+
+        if attention_mask is None:
+            lengths = torch.full((batch_size,), seq_len, device=device, dtype=torch.int32)
+            flat_input = input_ids.reshape(-1)
+            position_ids = torch.arange(seq_len, device=device, dtype=torch.long).repeat(batch_size)
+        else:
+            lengths = attention_mask.sum(dim=1).to(dtype=torch.int32, device=device)
+            flat_chunks = []
+            pos_chunks = []
+            for b in range(batch_size):
+                seq_len_b = int(lengths[b].item())
+                if seq_len_b == 0:
+                    continue
+                flat_chunks.append(input_ids[b, :seq_len_b])
+                pos_chunks.append(torch.arange(seq_len_b, device=device, dtype=torch.long))
+            if flat_chunks:
+                flat_input = torch.cat(flat_chunks, dim=0)
+                position_ids = torch.cat(pos_chunks, dim=0)
+            else:
+                flat_input = input_ids.new_empty((0,), dtype=input_ids.dtype)
+                position_ids = torch.empty((0,), device=device, dtype=torch.long)
+
+        cu_seqlens = torch.zeros(batch_size + 1, device=device, dtype=torch.int32)
+        cu_seqlens[1:] = torch.cumsum(lengths, dim=0)
+
+        if int(cu_seqlens[-1].item()) == 0:
+            hidden = torch.zeros(
+                (batch_size, seq_len, self.config.hidden_size),
+                device=device,
+                dtype=self.model.embedding.weight.dtype,
+            )
+        else:
+            if device.type == "cuda":
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    hidden_flat = self.model.forward_hidden(flat_input, cu_seqlens, position_ids)
+            else:
+                hidden_flat = self.model.forward_hidden(flat_input, cu_seqlens, position_ids)
+            hidden = torch.zeros(
+                (batch_size, seq_len, hidden_flat.shape[-1]),
+                device=device,
+                dtype=hidden_flat.dtype,
+            )
+            offset = 0
+            for b in range(batch_size):
+                seq_len_b = int(lengths[b].item())
+                if seq_len_b == 0:
+                    continue
+                hidden[b, :seq_len_b] = hidden_flat[offset : offset + seq_len_b]
+                offset += seq_len_b
+
+        return BaseModelOutputWithPast(last_hidden_state=hidden)
+
+
 def _map_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     if any(key.startswith("model.") for key in state_dict):
         return state_dict
@@ -190,11 +278,12 @@ def convert_checkpoint(pth_path: str, out_dir: str) -> str:
 
 
 try:
-    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer # type: ignore
+    from transformers import AutoConfig, AutoModel, AutoModelForCausalLM, AutoTokenizer # type: ignore
 
     from recursive_lm.huggingface.hf_tokenizer import RecursiveLMTokenizer
 
     AutoConfig.register(RecursiveLMConfig.model_type, RecursiveLMConfig)
+    AutoModel.register(RecursiveLMConfig, RecursiveLMModel)
     AutoModelForCausalLM.register(RecursiveLMConfig, RecursiveLMForCausalLM)
     AutoTokenizer.register(RecursiveLMConfig, RecursiveLMTokenizer)
 except Exception:

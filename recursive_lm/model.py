@@ -212,7 +212,7 @@ class RecursiveGPT(nn.Module):
             self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_hidden)
             nn.init.zeros_(self.rec_layer_embedding.weight)
 
-    def forward(self, input_ids, cu_seqlens, position_ids):
+    def forward_hidden(self, input_ids, cu_seqlens, position_ids):
         # input_ids: [total_tokens] (flattened)
         x = self.e_to_h(self.embedding(input_ids))  # [total_tokens, n_hidden]
         if self.config.standard_gpt:
@@ -229,6 +229,10 @@ class RecursiveGPT(nn.Module):
                 else:
                     x = x + self.rec_layer_embedding.weight[i]
                     x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
+        return x
+
+    def forward(self, input_ids, cu_seqlens, position_ids):
+        x = self.forward_hidden(input_ids, cu_seqlens, position_ids)
         if not self.config.tie_embed:
             return self.lm_head(self.norm_out(self.h_to_e(x))) # [total_tokens, vocab_size]
         else:
