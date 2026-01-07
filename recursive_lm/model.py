@@ -187,6 +187,9 @@ class RecursiveGPT(nn.Module):
         self.config = config
         self.grad_checkpointing = grad_checkpointing
 
+        #TEMP
+        self.config.sequence_len = self.config.rope_cache_len
+
         # Assert config is correct
         assert config.n_hidden % config.n_head == 0
 
