@@ -36,3 +36,6 @@ manifest-path = "rustbpe/Cargo.toml"
 
 [tool.uv]
 no-build-isolation-package = ["flash-attn"]
+
+[tool.uv.extra-build-dependencies]
+flash-attn = ["setuptools"]
