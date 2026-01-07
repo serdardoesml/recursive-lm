@@ -12,6 +12,7 @@ import torch
 import torch.nn.functional as F
 from transformers import PretrainedConfig, PreTrainedModel # type: ignore
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast # type: ignore
+from torch.nn.utils.rnn import pad_sequence
 
 from recursive_lm.model import ModelConfig, RecursiveGPT
 
@@ -147,18 +148,11 @@ class RecursiveLMForCausalLM(PreTrainedModel):
                     logits_flat = self.model(flat_input, cu_seqlens, position_ids)
             else:
                 logits_flat = self.model(flat_input, cu_seqlens, position_ids)
-            logits = torch.zeros(
-                (batch_size, seq_len, logits_flat.shape[-1]),
-                device=device,
-                dtype=logits_flat.dtype,
-            )
-            offset = 0
-            for b in range(batch_size):
-                seq_len_b = int(lengths[b].item())
-                if seq_len_b == 0:
-                    continue
-                logits[b, :seq_len_b] = logits_flat[offset : offset + seq_len_b]
-                offset += seq_len_b
+            splits = torch.split(logits_flat, lengths.tolist(), dim=0)
+            logits = pad_sequence(splits, batch_first=True)
+            if logits.size(1) < seq_len:
+                pad_len = seq_len - logits.size(1)
+                logits = F.pad(logits, (0, 0, 0, pad_len))
 
         loss = None
         if labels is not None:
@@ -243,18 +237,11 @@ class RecursiveLMModel(PreTrainedModel):
                     hidden_flat = self.model.forward_hidden(flat_input, cu_seqlens, position_ids)
             else:
                 hidden_flat = self.model.forward_hidden(flat_input, cu_seqlens, position_ids)
-            hidden = torch.zeros(
-                (batch_size, seq_len, hidden_flat.shape[-1]),
-                device=device,
-                dtype=hidden_flat.dtype,
-            )
-            offset = 0
-            for b in range(batch_size):
-                seq_len_b = int(lengths[b].item())
-                if seq_len_b == 0:
-                    continue
-                hidden[b, :seq_len_b] = hidden_flat[offset : offset + seq_len_b]
-                offset += seq_len_b
+            splits = torch.split(hidden_flat, lengths.tolist(), dim=0)
+            hidden = pad_sequence(splits, batch_first=True)
+            if hidden.size(1) < seq_len:
+                pad_len = seq_len - hidden.size(1)
+                hidden = F.pad(hidden, (0, 0, 0, pad_len))
 
         return BaseModelOutputWithPast(last_hidden_state=hidden)
 
