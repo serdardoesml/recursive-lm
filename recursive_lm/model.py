@@ -110,7 +110,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_hidden, config.n_hidden * config.mlp_mul, bias=False)
         self.c_gate = nn.Linear(config.n_hidden, config.n_hidden * config.mlp_mul, bias=False)
         self.c_proj = nn.Linear(config.n_hidden * config.mlp_mul, config.n_hidden, bias=False)
-        nn.init.zeros_(self.c_proj.weight) # Zero init (https://arxiv.org/pdf/2203.03466)
+        nn.init.zeros_(self.c_proj.weight) # Zero init (Idea from modded-nanogpt speedrun, empirically seems to work well)
 
     def forward(self, x):
         # x: [total_tokens, n_hidden]
