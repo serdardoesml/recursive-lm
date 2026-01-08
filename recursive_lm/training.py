@@ -208,8 +208,7 @@ def get_linear_schedule_with_warmup(
     min_lrs: list[float],
     last_epoch: int = -1,
 ):
-    # Linear warmup, then linear decay to min_lrs.
-    # LambdaLR lets us apply separate schedules for embed and block LRs.
+    # Simple linear warmup, then linear decay to min_lrs.
     base_lrs = [group["lr"] for group in optimizer.param_groups]
     min_factors = []
     for lr, min_lr in zip(base_lrs, min_lrs, strict=True):
@@ -225,6 +224,7 @@ def get_linear_schedule_with_warmup(
     decay_steps = max(1, total_steps - warmup_steps)
     warmup_start = 1e-8
 
+    # LambdaLR lets us apply separate schedules for embed and block LRs.
     def build_lambda(min_factor: float):
         def lr_lambda(step: int):
             if warmup_steps > 0 and step < warmup_steps:
