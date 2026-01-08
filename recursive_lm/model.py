@@ -11,7 +11,6 @@ from dataclasses import dataclass
 
 @dataclass
 class ModelConfig:
-    sequence_len: int = 256
     vocab_size: int = 32768
     n_head: int = 16 # number of attention heads
     n_hidden: int = 384
@@ -27,31 +26,6 @@ class ModelConfig:
     @property
     def n_headdim(self) -> int:
         return self.n_hidden // self.n_head
-
-    @property
-    def total_param_size(self) -> int:
-        if self.standard_gpt:
-            return self.total_unrolled_param_size
-        embed = (self.vocab_size * self.n_wembed) + (2 * self.n_hidden * self.n_wembed)
-        attn = (self.n_hidden * 4 * self.n_hidden)
-        mlp = (self.n_hidden * self.n_hidden * self.mlp_mul) * 2
-        if self.tie_embed:
-            return embed + attn + mlp
-        else:
-            return embed + (self.vocab_size * self.n_wembed) + attn + mlp
-        
-    @property
-    def total_unrolled_param_size(self) -> int:
-        embed = (self.vocab_size * self.n_wembed) + (2 * self.n_hidden * self.n_wembed)
-        attn = (self.n_hidden * 4 * self.n_hidden)
-        mlp = (self.n_hidden * self.n_hidden * self.mlp_mul) * 2
-        if self.tie_embed:
-            return embed + ((attn + mlp) * self.rec_depth)
-        else:
-            return embed + (self.vocab_size * self.n_wembed) + ((attn + mlp) * self.rec_depth)
-        
-    # Layer embeddings not calculated as they are negligible (around 10k-20k)
-    # TODO: Add layer embeddings too
 
 class RMSNorm(nn.Module):
     # Replaced initial unparameterized norm with this to enable more flexibility for the model.
@@ -155,12 +129,10 @@ class Block(nn.Module):
         self.norm_mlp = RMSNorm(config.n_hidden)
 
     def forward(self, x, cu_seqlens, max_seqlen, position_ids):
-        # We do both Pre and Post RMSNorm (without affecting the residual stream)
-        # In addition, we also do QK Norm inside the attention layer.
-        # Same normalizations as Gemma 3 (https://arxiv.org/pdf/2503.19786)
+        # We do pre-norm and QK norm. 
+        # We used to do a Gemma 3 style post-norm, but removed it to improve stability 
+        # and keep the residual stream norm in check. Seems to work fine.
 
-        # TEMPORARILY REMOVED POST NORM
-        # TODO: Update this comment to reflect post norm removal results and why we kept it.
         x = x + self.attn(self.norm_attn(x), cu_seqlens, max_seqlen, position_ids)
         x = x + self.mlp(self.norm_mlp(x))
         return x
@@ -187,9 +159,6 @@ class RecursiveGPT(nn.Module):
         self.config = config
         self.grad_checkpointing = grad_checkpointing
 
-        #TEMP
-        self.config.sequence_len = self.config.rope_cache_len
-
         # Assert config is correct
         assert config.n_hidden % config.n_head == 0
 
@@ -210,28 +179,40 @@ class RecursiveGPT(nn.Module):
         else:
             self.recursive_block = Block(config, cos_cache, sin_cache)
 
-            # Layer embeddings (https://arxiv.org/pdf/2502.13181)
-            # Note: Our layer embeddings are simpler than RingFormers, but the idea came from there.
+            # Per layer embeddings
+            # TODO: Explain the idea in more detail. 
+            # (Removed reference to RingFormers as this is fundamentally different and not dependent on input)
             self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_hidden)
             nn.init.zeros_(self.rec_layer_embedding.weight)
+
+    @property
+    def total_param_size(self) -> int:
+        return sum(p.numel() for p in self.parameters())
+
+    @property
+    def total_unrolled_param_size(self) -> int:
+        if self.config.standard_gpt:
+            return self.total_param_size
+        block_params = sum(p.numel() for p in self.recursive_block.parameters())
+        return self.total_param_size + (self.config.rec_depth - 1) * block_params
 
     def forward_hidden(self, input_ids, cu_seqlens, position_ids):
         # input_ids: [total_tokens] (flattened)
         x = self.e_to_h(self.embedding(input_ids))  # [total_tokens, n_hidden]
         if self.config.standard_gpt:
             for i in range(self.config.rec_depth):
-                x = self.blocks[i](x, cu_seqlens, self.config.sequence_len, position_ids)
+                x = self.blocks[i](x, cu_seqlens, self.config.rope_cache_len, position_ids)
         else:
             for i in range(self.config.rec_depth):
                 if self.grad_checkpointing:
                     def recursive_step(x, cu_seqlens, position_ids, i=i):
                         x = x + self.rec_layer_embedding.weight[i]
-                        return self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
+                        return self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids)
 
                     x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, use_reentrant=False)
                 else:
                     x = x + self.rec_layer_embedding.weight[i]
-                    x = self.recursive_block(x, cu_seqlens, self.config.sequence_len, position_ids)
+                    x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids)
         return x
 
     def forward(self, input_ids, cu_seqlens, position_ids):

@@ -226,7 +226,7 @@ def main():
 
             analyzer.reset()
 
-            ctx = tokens[-config.sequence_len:]
+            ctx = tokens[-config.rope_cache_len:]
             input_ids = torch.tensor(ctx, dtype=torch.long, device=device)
             cu_seqlens = torch.tensor([0, input_ids.numel()], dtype=torch.int32, device=device)
             position_ids = torch.arange(input_ids.numel(), dtype=torch.long, device=device)
@@ -259,7 +259,7 @@ def main():
                 "rec_depth": int(config.rec_depth),
                 "n_head": int(config.n_head),
                 "n_hidden": int(config.n_hidden),
-                "sequence_len": int(config.sequence_len),
+                "sequence_len": int(config.rope_cache_len),
                 "prompt": prompt,
                 "prompt_token_count": int(len(tokens)),
                 "ctx_token_count": int(len(ctx)),
@@ -385,7 +385,7 @@ def main():
         # Normal generation mode (unchanged behavior)
         with torch.no_grad():
             for _ in range(args.gen_tok_count):
-                ctx = tokens[-config.sequence_len:]
+                ctx = tokens[-config.rope_cache_len:]
                 input_ids = torch.tensor(ctx, dtype=torch.long, device=device)
                 cu_seqlens = torch.tensor([0, input_ids.numel()], dtype=torch.int32, device=device)
                 position_ids = torch.arange(input_ids.numel(), dtype=torch.long, device=device)

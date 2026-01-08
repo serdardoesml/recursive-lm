@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from recursive_lm.common import get_base_dir
+from recursive_lm.common import get_base_dir, print_banner
 from recursive_lm.model import ModelConfig
 from recursive_lm.training import TrainingConfig, train
 
@@ -24,8 +24,8 @@ parser.add_argument("--wandb_project", type=str, default=TrainingConfig.wandb_pr
 parser.add_argument("--run_name", type=str, default=TrainingConfig.run_name)
 parser.add_argument("--grad_clip", type=str, choices=["true", "false"], default=TrainingConfig.grad_clip)
 parser.add_argument("--max_grad_norm", type=float, default=TrainingConfig.max_grad_norm)
+parser.add_argument("--sequence_len", type=int, default=TrainingConfig.sequence_len)
 
-parser.add_argument("--sequence_len", type=int, default=ModelConfig.sequence_len)
 parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
 parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
 parser.add_argument("--n_hidden", type=int, default=ModelConfig.n_hidden)
@@ -39,8 +39,9 @@ parser.add_argument("--save", type=str, choices=["true", "false"], default="true
 
 args = parser.parse_args()
 
+print_banner()
+
 model_config = ModelConfig(
-    sequence_len=args.sequence_len,
     vocab_size=args.vocab_size,
     n_head=args.n_head,
     n_hidden=args.n_hidden,
@@ -61,6 +62,7 @@ train_config = TrainingConfig(
     wd_muon=args.wd_muon,
     microbatch_tok=args.microbatch_tok,
     grad_acc=args.grad_acc,
+    sequence_len=args.sequence_len,
     max_tok_count=args.max_tok_count,
     epoch=args.epoch,
     warmup_steps=args.warmup_steps,

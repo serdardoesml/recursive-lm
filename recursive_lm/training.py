@@ -10,46 +10,6 @@ from datetime import datetime
 import os
 import time
 
-def get_linear_schedule_with_warmup(
-    optimizer: torch.optim.Optimizer,
-    num_warmup_steps: int,
-    num_training_steps: int,
-    min_lrs: list[float],
-    last_epoch: int = -1,
-):
-    base_lrs = [group["lr"] for group in optimizer.param_groups]
-    min_factors = []
-    for lr, min_lr in zip(base_lrs, min_lrs, strict=True):
-        if lr <= 0:
-            min_factor = 1.0
-        else:
-            min_factor = min_lr / lr
-            if not 0 <= min_factor <= 1:
-                raise ValueError(f"min_lr must be in [0, base_lr], got min_lr={min_lr} base_lr={lr}")
-        min_factors.append(min_factor)
-    warmup_steps = max(0, num_warmup_steps)
-    total_steps = max(1, num_training_steps)
-    decay_steps = max(1, total_steps - warmup_steps)
-    warmup_start = 1e-8
-
-    def build_lambda(min_factor: float):
-        def lr_lambda(step: int):
-            if warmup_steps > 0 and step < warmup_steps:
-                return warmup_start + (1.0 - warmup_start) * (step / warmup_steps)
-            decay_step = step - warmup_steps
-            if decay_step >= decay_steps:
-                return min_factor
-            decay_progress = decay_step / decay_steps
-            return (1.0 - decay_progress) * (1.0 - min_factor) + min_factor
-        return lr_lambda
-
-    lr_lambdas = [build_lambda(min_factor) for min_factor in min_factors]
-    return torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=lr_lambdas,
-        last_epoch=last_epoch,
-    )
-
 @dataclass
 class TrainingConfig:
     model_config: ModelConfig
@@ -66,6 +26,9 @@ class TrainingConfig:
     # Default target batch size: 65536 tok
     microbatch_tok: int = 32768
     grad_acc: int = 2
+    sequence_len: int = 256 # Only for training, does not change model itself.
+
+    # TODO: Add feature so max_tok_count is optional and by default determined from full dataset size.
 
     # 130.3M default max tok count, 4000 microbatches, 2000 updates per epoch
     max_tok_count: int = 130300589 # Update when changing dataset or tokenizer
@@ -154,15 +117,15 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "
         f"wd_muon {train_config.wd_muon:.6g} | "
-        f"distinct params {train_config.model_config.total_param_size:,} | "
-        f"unrolled params {train_config.model_config.total_unrolled_param_size:,}"
+        f"distinct params {model.total_param_size:,} | "
+        f"unrolled params {model.total_unrolled_param_size:,}"
     )
 
     for epoch_idx in range(train_config.epoch):
         for input_ids, targets, cu_seqlens, position_ids in batch_iterator(
             parquet_path,
             tokens_per_batch=train_config.microbatch_tok,
-            max_sl=train_config.model_config.sequence_len,
+            max_sl=train_config.sequence_len,
             device=device
         ):
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -222,6 +185,46 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         save_model(model, train_config.run_name)
     if wandb_run is not None:
         wandb_run.finish()
+
+def get_linear_schedule_with_warmup(
+    optimizer: torch.optim.Optimizer,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    min_lrs: list[float],
+    last_epoch: int = -1,
+):
+    base_lrs = [group["lr"] for group in optimizer.param_groups]
+    min_factors = []
+    for lr, min_lr in zip(base_lrs, min_lrs, strict=True):
+        if lr <= 0:
+            min_factor = 1.0
+        else:
+            min_factor = min_lr / lr
+            if not 0 <= min_factor <= 1:
+                raise ValueError(f"min_lr must be in [0, base_lr], got min_lr={min_lr} base_lr={lr}")
+        min_factors.append(min_factor)
+    warmup_steps = max(0, num_warmup_steps)
+    total_steps = max(1, num_training_steps)
+    decay_steps = max(1, total_steps - warmup_steps)
+    warmup_start = 1e-8
+
+    def build_lambda(min_factor: float):
+        def lr_lambda(step: int):
+            if warmup_steps > 0 and step < warmup_steps:
+                return warmup_start + (1.0 - warmup_start) * (step / warmup_steps)
+            decay_step = step - warmup_steps
+            if decay_step >= decay_steps:
+                return min_factor
+            decay_progress = decay_step / decay_steps
+            return (1.0 - decay_progress) * (1.0 - min_factor) + min_factor
+        return lr_lambda
+
+    lr_lambdas = [build_lambda(min_factor) for min_factor in min_factors]
+    return torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lr_lambdas,
+        last_epoch=last_epoch,
+    )
 
 def save_model(model, run_name: str | None):
     if run_name:

@@ -22,7 +22,6 @@ class RecursiveLMConfig(PretrainedConfig):
 
     def __init__(
         self,
-        sequence_len: int = ModelConfig.sequence_len,
         vocab_size: int = ModelConfig.vocab_size,
         n_head: int = ModelConfig.n_head,
         n_hidden: int = ModelConfig.n_hidden,
@@ -45,7 +44,6 @@ class RecursiveLMConfig(PretrainedConfig):
             },
         )
         super().__init__(**kwargs)
-        self.sequence_len = sequence_len
         self.vocab_size = vocab_size
         self.n_head = n_head
         self.n_hidden = n_hidden
@@ -61,7 +59,6 @@ class RecursiveLMConfig(PretrainedConfig):
 
     def to_model_config(self) -> ModelConfig:
         return ModelConfig(
-            sequence_len=self.sequence_len,
             vocab_size=self.vocab_size,
             n_head=self.n_head,
             n_hidden=self.n_hidden,
