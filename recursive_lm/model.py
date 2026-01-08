@@ -4,10 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
+from dataclasses import dataclass
 
 from flash_attn import flash_attn_varlen_qkvpacked_func # type: ignore
-
-from dataclasses import dataclass
+# TODO: Add backup attention implementation for non-cuda GPUs, could be useful for local inference and analysis.
 
 @dataclass
 class ModelConfig:
@@ -27,8 +27,8 @@ class ModelConfig:
     def n_headdim(self) -> int:
         return self.n_hidden // self.n_head
 
-class RMSNorm(nn.Module):
-    # Replaced initial unparameterized norm with this to enable more flexibility for the model.
+
+class RMSNorm(nn.Module): # Replaced initial unparameterized norm with this to enable more flexibility for the model.
 
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
@@ -59,6 +59,7 @@ def apply_rotary_emb(x, cos, sin):
 class CausalVarlenSelfAttention(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
         super().__init__()
+
         # One fused projection for QKV
         self.Wqkv = nn.Linear(config.n_hidden, 3 * config.n_hidden, bias=False)
         self.Wo   = nn.Linear(config.n_hidden, config.n_hidden, bias=False)
@@ -67,6 +68,7 @@ class CausalVarlenSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
         self.norm_qk = RMSNorm(self.head_dim)
+
         # We register it as a buffer to ensure it gets moved to device together with the model
         self.register_buffer("cos_cache", cos_cache, persistent=False)
         self.register_buffer("sin_cache", sin_cache, persistent=False)
@@ -104,6 +106,7 @@ class CausalVarlenSelfAttention(nn.Module):
         out = out.reshape(-1, self.n_hidden)
         return self.Wo(out) # [total_tokens, n_hidden]
     
+
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -132,10 +135,10 @@ class Block(nn.Module):
         # We do pre-norm and QK norm. 
         # We used to do a Gemma 3 style post-norm, but removed it to improve stability 
         # and keep the residual stream norm in check. Seems to work fine.
-
         x = x + self.attn(self.norm_attn(x), cu_seqlens, max_seqlen, position_ids)
         x = x + self.mlp(self.norm_mlp(x))
         return x
+
 
 class RecursiveGPT(nn.Module):
     @staticmethod

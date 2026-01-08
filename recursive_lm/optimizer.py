@@ -1,9 +1,9 @@
 """
- NorMuon optimizer (https://arxiv.org/pdf/2510.05491)
- Code copied and modified from https://github.com/zichongli5/NorMuon/
+NorMuon optimizer (https://arxiv.org/pdf/2510.05491)
+Code copied and modified from https://github.com/zichongli5/NorMuon/
 
- Modified to implement Cautious Weight Decay (https://arxiv.org/pdf/2510.12402)
- CWD decays only coordinates where update and parameter align.
+Modified to implement Cautious Weight Decay (https://arxiv.org/pdf/2510.12402)
+CWD decays only coordinates where update and parameter align.
 """
 
 import torch
@@ -47,7 +47,8 @@ def normuon_update(grad, momentum, second_momentum, beta=0.95, beta2=0.95, ns_st
     update = zeropower_via_newtonschulz5(update, steps=ns_steps)
     if original_shape is not None:
         update = update.reshape(original_shape)
-    ################ NorMuon added ###################
+
+    # Normuon Added
     vnorm = update.norm(dim=(-2,-1), keepdim=True)
     v_mean = torch.mean(update * update, dim=-1, keepdim=True, dtype=second_momentum.dtype)
     second_momentum.lerp_(v_mean, 1 - beta2)
@@ -55,7 +56,7 @@ def normuon_update(grad, momentum, second_momentum, beta=0.95, beta2=0.95, ns_st
     update.mul_(step_size)
     vnorm_new = update.norm(dim=(-2,-1), keepdim=True)
     update.mul_(vnorm / (vnorm_new.add_(1e-10))) # This scaling keep the update norm the same as pre-normalization
-    ##################################################
+
     update *= max(1, grad.size(-2) / grad.size(-1))**0.5
     return update
 

@@ -1,3 +1,5 @@
+"""Simple training loop, most of the code is boilerplate metrics and initializing stuff."""
+
 import torch
 import torch.nn.functional as F
 from .optimizer import SingleDeviceNorMuonWithAuxAdam
@@ -14,11 +16,11 @@ import time
 class TrainingConfig:
     model_config: ModelConfig
     lr_embed: float = 0.007
-    lr_block: float = 0.02 # Muon
+    lr_block: float = 0.02 # Muon requires higher learning rate.
     wd_adam: float = 0.005
     wd_muon: float = 0.1
 
-    # MASSIVE reduction in memory use as memory usage essentially reduces to single depth.
+    # MASSIVE reduction in memory use as it allows almost O(1) memory complexity for depth.
     # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
     # Essentially makes training compute bound, useful for super high depths or large MLP multipliers on small GPUs.
     grad_checkpointing: bool = False 
@@ -48,7 +50,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device)
 
-    # Set up parameter groups
+    # Set up param groups.
+    # We split params so only recursive block params use Muon, 
+    # and everything else (embeddings and norms) uses AdamW.
     embed_params = list(model.embedding.parameters())
     embed_params += list(model.e_to_h.parameters())
     embed_params += list(model.h_to_e.parameters())
@@ -86,6 +90,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         (train_config.max_tok_count * train_config.epoch)
         / (train_config.microbatch_tok * train_config.grad_acc)
     )
+
+    # Initializing stuff
     step = 0
     micro_step = 0
     accum_loss = 0.0
@@ -122,27 +128,35 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     )
 
     for epoch_idx in range(train_config.epoch):
+        # Batch iterator re-initializes at each epoch with a different random shuffle
         for input_ids, targets, cu_seqlens, position_ids in batch_iterator(
             parquet_path,
             tokens_per_batch=train_config.microbatch_tok,
             max_sl=train_config.sequence_len,
             device=device
         ):
+            # Everything is bf16 for fast training with A100 and H100s .
+            # Flash-attn doesn't support anything else, so no need to change this really. 
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 logits = model(input_ids, cu_seqlens, position_ids)
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
+            # Accumulate gradients
             loss_float = float(loss.detach())
             accum_loss += loss_float
             (loss / train_config.grad_acc).backward()
             micro_step += 1
 
             if micro_step % train_config.grad_acc == 0:
+                # Optimizer Step
                 if train_config.grad_clip:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.max_grad_norm)
                 opt.step()
                 scheduler.step()
                 step += 1
+
+                # Calculate metrics and optionally log to wandb.
+                # Nothing interesting here. 
                 avg_loss = accum_loss / train_config.grad_acc
                 now = time.time()
                 step_time = now - last_step_time
@@ -171,9 +185,10 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                             "step_time_s": step_time,
                             "tok_per_s": tok_per_s,
                         },
-                        step=tokens_processed,
+                        step=tokens_processed, # By default, x axis is token count rather than step count on wandb graphs
                     )
                 last_step_time = now
+
                 if step >= total_steps:
                     break
                 opt.zero_grad(set_to_none=True)
@@ -182,7 +197,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             break
 
     if save:
-        save_model(model, train_config.run_name)
+        save_model(model, train_config.run_name) 
     if wandb_run is not None:
         wandb_run.finish()
 
@@ -193,6 +208,8 @@ def get_linear_schedule_with_warmup(
     min_lrs: list[float],
     last_epoch: int = -1,
 ):
+    # Linear warmup, then linear decay to min_lrs.
+    # LambdaLR lets us apply separate schedules for embed and block LRs.
     base_lrs = [group["lr"] for group in optimizer.param_groups]
     min_factors = []
     for lr, min_lr in zip(base_lrs, min_lrs, strict=True):
@@ -227,6 +244,8 @@ def get_linear_schedule_with_warmup(
     )
 
 def save_model(model, run_name: str | None):
+    # Saves weights and model config directly. 
+    # Can be converted to a hf model later with a wrapper using convert_hf.py (Dirty implementation for now)
     if run_name:
         filename = f"{run_name}.pth"
     else:
