@@ -37,9 +37,9 @@ parser.add_argument("--standard_gpt", type=str, choices=["true", "false"], defau
 parser.add_argument("--grad_checkpointing", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--save", type=str, choices=["true", "false"], default="true")
 
-args = parser.parse_args()
-
 print_banner()
+
+args = parser.parse_args()
 
 model_config = ModelConfig(
     vocab_size=args.vocab_size,
