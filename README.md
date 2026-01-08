@@ -1,3 +1,5 @@
+General code structure inspired heavily from Andrej Karpathy's nanochat and nanogpt repositories.
+
 # Commands
 
 Build rustbpe with:
