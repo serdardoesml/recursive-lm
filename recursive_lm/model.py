@@ -63,7 +63,7 @@ class CausalVarlenSelfAttention(nn.Module):
         # One fused projection for QKV
         self.Wqkv = nn.Linear(config.n_hidden, 3 * config.n_hidden, bias=False)
         self.Wo   = nn.Linear(config.n_hidden, config.n_hidden, bias=False)
-        nn.init.zeros_(self.Wo.weight) # Zero init (https://arxiv.org/pdf/2203.03466)
+        nn.init.zeros_(self.Wo.weight) # Zero init (Idea from modded-nanogpt speedrun, empirically seems to work well)
         self.n_hidden = config.n_hidden
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
@@ -185,8 +185,9 @@ class RecursiveGPT(nn.Module):
             # Per layer embeddings
             # TODO: Explain the idea in more detail. 
             # (Removed reference to RingFormers as this is fundamentally different and not dependent on input)
+            # We initialize at zero to let model start without any depth specific information and learn it gradually.
             self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_hidden)
-            nn.init.zeros_(self.rec_layer_embedding.weight)
+            nn.init.zeros_(self.rec_layer_embedding.weight) 
 
     @property
     def total_param_size(self) -> int:
