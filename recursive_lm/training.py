@@ -60,7 +60,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     ).to(device)
 
     if train_config.torch_compile:
-        model = torch.compile(model, dynamic=True)
+        model = torch.compile(model, dynamic=True, mode="max-autotune-no-cudagraphs") # Cudagraphs do not work
 
     # Set up param groups.
     # We split params so only recursive block params use Muon, 
