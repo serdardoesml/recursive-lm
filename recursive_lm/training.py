@@ -59,7 +59,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device)
 
-    if train_config.torch_compile: 
+    compile_enabled = train_config.torch_compile
+    if compile_enabled:
         model = torch.compile(model, dynamic=True)
 
     # Set up param groups.
@@ -108,7 +109,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     micro_step = 0
     accum_loss = 0.0
     opt.zero_grad(set_to_none=True)
-    start_time = time.time()
+    compile_start = time.time() if compile_enabled else None
+    start_time = time.time() if not compile_enabled else None
     last_step_time = start_time
     scheduler = get_linear_schedule_with_warmup(
         opt,
@@ -168,39 +170,27 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 scheduler.step()
                 step += 1
 
-                # Calculate metrics and optionally log to wandb.
-                # Nothing interesting here. 
-                avg_loss = accum_loss / train_config.grad_acc
-                now = time.time()
-                step_time = now - last_step_time
-                avg_step_time = (now - start_time) / step
-                remaining = avg_step_time * (total_steps - step)
-                lr_embed, lr_block = scheduler.get_last_lr()
-                tok_per_s = (train_config.microbatch_tok * train_config.grad_acc) / step_time
-                tokens_processed = step * train_config.microbatch_tok * train_config.grad_acc
-                print(
-                    f"Epoch {epoch_idx + 1}/{train_config.epoch} "
-                    f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
-                    f"lr_embed {lr_embed:.6g} lr_block {lr_block:.6g} "
-                    f"step_time {step_time:.2f}s tok/s {tok_per_s:.0f} "
-                    f"eta {remaining:.0f}s "
-                )
-                if wandb_run is not None:
-                    wandb_run.log(
-                        {
-                            "epoch": epoch_idx + 1,
-                            "step": step,
-                            "total_steps": total_steps,
-                            "tokens_processed": tokens_processed,
-                            "loss": avg_loss,
-                            "lr_embed": lr_embed,
-                            "lr_block": lr_block,
-                            "step_time_s": step_time,
-                            "tok_per_s": tok_per_s,
-                        },
-                        step=tokens_processed, # By default, x axis is token count rather than step count on wandb graphs
+                # Metrics and logging
+                if compile_enabled and step == 1:
+                    now = time.time()
+                    compile_time = now - compile_start
+                    print(f"Compile_time {compile_time:.2f}s")
+                    start_time = now
+                    last_step_time = now
+                else:
+                    now = time.time()
+                    last_step_time = report_step(
+                        now,
+                        epoch_idx,
+                        step,
+                        total_steps,
+                        accum_loss,
+                        train_config,
+                        scheduler,
+                        last_step_time,
+                        start_time,
+                        wandb_run,
                     )
-                last_step_time = now
 
                 if step >= total_steps:
                     break
@@ -273,3 +263,47 @@ def save_model(model, run_name: str | None):
         },
         path,
     )
+
+# Print metrics and optionally report to wandb
+def report_step(
+    now: float,
+    epoch_idx: int,
+    step: int,
+    total_steps: int,
+    accum_loss: float,
+    train_config: TrainingConfig,
+    scheduler,
+    last_step_time: float,
+    start_time: float,
+    wandb_run,
+) -> float:
+    avg_loss = accum_loss / train_config.grad_acc
+    step_time = now - last_step_time
+    avg_step_time = (now - start_time) / step
+    remaining = avg_step_time * (total_steps - step)
+    lr_embed, lr_block = scheduler.get_last_lr()
+    tok_per_s = (train_config.microbatch_tok * train_config.grad_acc) / step_time
+    tokens_processed = step * train_config.microbatch_tok * train_config.grad_acc
+    print(
+        f"Epoch {epoch_idx + 1}/{train_config.epoch} "
+        f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
+        f"lr_embed {lr_embed:.6g} lr_block {lr_block:.6g} "
+        f"step_time {step_time:.2f}s tok/s {tok_per_s:.0f} "
+        f"eta {remaining:.0f}s "
+    )
+    if wandb_run is not None:
+        wandb_run.log(
+            {
+                "epoch": epoch_idx + 1,
+                "step": step,
+                "total_steps": total_steps,
+                "tokens_processed": tokens_processed,
+                "loss": avg_loss,
+                "lr_embed": lr_embed,
+                "lr_block": lr_block,
+                "step_time_s": step_time,
+                "tok_per_s": tok_per_s,
+            },
+            step=tokens_processed, # By default, x axis is token count rather than step count on wandb graphs
+        )
+    return now
