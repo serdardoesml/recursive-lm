@@ -47,7 +47,7 @@ class TrainingConfig:
     grad_clip: bool = True
     max_grad_norm: float = 2.0
 
-    # Massive speedup with torch 2.9.1 (more than 50% speedup), however with torch 2.4 it was constantly triggering recompilation.
+    # Massive speedup with torch 2.9.1 (33% speedup), however with torch 2.4 it was constantly triggering recompilation.
     # Does not work with grad checkpointing at least with 2.9.1, seems to be related to dynamic mode.
     # Most likely a bug that will get fixed in a later torch version, might be worth trying later again.
     # Another weird thing is without compilation, 2.4 was faster than 2.9.1 at least on H100s, no idea why.
