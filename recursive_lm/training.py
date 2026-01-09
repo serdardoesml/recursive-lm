@@ -59,8 +59,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device)
 
-    compile_enabled = train_config.torch_compile
-    if compile_enabled:
+    if train_config.torch_compile:
         model = torch.compile(model, dynamic=True)
 
     # Set up param groups.
@@ -109,8 +108,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     micro_step = 0
     accum_loss = 0.0
     opt.zero_grad(set_to_none=True)
-    compile_start = time.time() if compile_enabled else None
-    start_time = time.time() if not compile_enabled else None
+    start_time = time.time()
     last_step_time = start_time
     scheduler = get_linear_schedule_with_warmup(
         opt,
@@ -171,10 +169,13 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 step += 1
 
                 # Metrics and logging
-                if compile_enabled and step == 1:
+                if step == 1:
                     now = time.time()
-                    compile_time = now - compile_start
-                    print(f"Compile_time {compile_time:.2f}s")
+                    first_step_time = now - start_time
+                    if train_config.torch_compile:
+                        print(f"Compile time: {first_step_time:.2f}s")
+                    else:
+                        print(f"First step time: {first_step_time:.2f}s")
                     start_time = now
                     last_step_time = now
                 else:
@@ -279,10 +280,7 @@ def report_step(
 ) -> float:
     avg_loss = accum_loss / train_config.grad_acc
     step_time = now - last_step_time
-    if train_config.torch_compile:
-        avg_step_time = (now - start_time) / (step - 1)
-    else:
-        avg_step_time = (now - start_time) / step
+    avg_step_time = (now - start_time) / (step - 1)
     remaining = avg_step_time * (total_steps - step)
     lr_embed, lr_block = scheduler.get_last_lr()
     tok_per_s = (train_config.microbatch_tok * train_config.grad_acc) / step_time
