@@ -58,7 +58,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device)
 
-    model = torch.compile(model, dynamic=True)
+    if train_config.torch_compile: 
+        model = torch.compile(model, dynamic=True)
 
     # Set up param groups.
     # We split params so only recursive block params use Muon, 
