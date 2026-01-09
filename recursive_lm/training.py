@@ -279,7 +279,10 @@ def report_step(
 ) -> float:
     avg_loss = accum_loss / train_config.grad_acc
     step_time = now - last_step_time
-    avg_step_time = (now - start_time) / step
+    if train_config.torch_compile:
+        avg_step_time = (now - start_time) / (step - 1)
+    else:
+        avg_step_time = (now - start_time) / step
     remaining = avg_step_time * (total_steps - step)
     lr_embed, lr_block = scheduler.get_last_lr()
     tok_per_s = (train_config.microbatch_tok * train_config.grad_acc) / step_time
