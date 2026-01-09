@@ -20,12 +20,12 @@ class TrainingConfig:
     wd_adam: float = 0.005
     wd_muon: float = 0.1
 
-    # MASSIVE reduction in memory use as it allows almost O(1) memory complexity for depth.
+    # MASSIVE reduction in memory use with grad checkpointing as it allows almost O(1) memory complexity for depth.
     # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
     # Essentially makes training compute bound, useful for super high depths or large MLP multipliers on small GPUs.
 
     # WARNING: Performance and memory use depends a lot on torch version, not sure how to interpret this. Further testing required.
-    # What is written above applies to torch 2.4 and flash-attn 2.8.3 without compiling
+    # What is written above applies to torch 2.4 and flash-attn 2.8.3 without compiling, does not seem to work with compile
     grad_checkpointing: bool = False 
 
     # Default target batch size: 65536 tok
@@ -50,6 +50,7 @@ class TrainingConfig:
     # Massive speedup with torch 2.9.1 (more than 50% speedup), however with torch 2.4 it was constantly triggering recompilation.
     # Does not work with grad checkpointing at least with 2.9.1, seems to be related to dynamic mode.
     # Most likely a bug that will get fixed in a later torch version, might be worth trying later again.
+    # Another weird thing is without compilation, 2.4 was faster than 2.9.1 at least on H100s, no idea why.
     torch_compile: bool = True 
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
