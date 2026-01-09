@@ -23,6 +23,9 @@ class TrainingConfig:
     # MASSIVE reduction in memory use as it allows almost O(1) memory complexity for depth.
     # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
     # Essentially makes training compute bound, useful for super high depths or large MLP multipliers on small GPUs.
+
+    # WARNING: Performance and memory use depends a lot on torch version, not sure how to interpret this. Further testing required.
+    # What i said above applies to torch 2.4 and flash-attn 2.8.3
     grad_checkpointing: bool = False 
 
     # Default target batch size: 65536 tok
@@ -49,6 +52,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         train_config.model_config,
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device)
+
+    model = torch.compile(model, dynamic=True)
 
     # Set up param groups.
     # We split params so only recursive block params use Muon, 
