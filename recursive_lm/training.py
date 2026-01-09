@@ -25,7 +25,7 @@ class TrainingConfig:
     # Essentially makes training compute bound, useful for super high depths or large MLP multipliers on small GPUs.
 
     # WARNING: Performance and memory use depends a lot on torch version, not sure how to interpret this. Further testing required.
-    # What i said above applies to torch 2.4 and flash-attn 2.8.3
+    # What is written above applies to torch 2.4 and flash-attn 2.8.3 without compiling
     grad_checkpointing: bool = False 
 
     # Default target batch size: 65536 tok
@@ -46,6 +46,11 @@ class TrainingConfig:
     run_name: str = "rec-d24-small"
     grad_clip: bool = True
     max_grad_norm: float = 2.0
+
+    # Massive speedup with torch 2.9.1 (more than 50% speedup), however with torch 2.4 it was constantly triggering recompilation.
+    # Does not work with grad checkpointing at least with 2.9.1, seems to be related to dynamic mode.
+    # Most likely a bug that will get fixed in a later torch version, might be worth trying later again.
+    torch_compile: bool = True 
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
     model = RecursiveGPT(
@@ -124,6 +129,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         f"epochs {train_config.epoch} | "
         f"total_steps {total_steps} | "
         f"grad_checkpointing {train_config.grad_checkpointing} | "
+        f"torch_compile {train_config.torch_compile} | "
         f"lr_embed {train_config.lr_embed:.6g} | "
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "

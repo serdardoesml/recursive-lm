@@ -37,6 +37,10 @@ parser.add_argument("--standard_gpt", type=str, choices=["true", "false"], defau
 parser.add_argument("--grad_checkpointing", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--save", type=str, choices=["true", "false"], default="true")
 
+# Disable if having issues or constant recompilation, may not work with grad checkpointing
+# Detailed explanation in training.py
+parser.add_argument("--torch_compile", type=str, choices=["true", "false"], default="true") 
+
 print_banner()
 
 args = parser.parse_args()
@@ -72,6 +76,7 @@ train_config = TrainingConfig(
     grad_clip=args.grad_clip == "true",
     max_grad_norm=args.max_grad_norm,
     grad_checkpointing=args.grad_checkpointing == "true",
+    torch_compile=args.torch_compile == "true",
 )
 
 parquet_path = os.path.join(get_base_dir(), "data", "tokenized", args.dataset)
