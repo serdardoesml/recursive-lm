@@ -9,7 +9,7 @@ dependencies = [
     "maturin>=1.10.2",
     "pyarrow>=22.0.0",
     "tiktoken>=0.12.0",
-    "torch @ https://download.pytorch.org/whl/nightly/cu130/torch-2.10.0.dev20251213%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl",
+    "torch==2.10.0.dev20251213+cu130",
     "wandb>=0.23.1",
 ]
 
@@ -33,9 +33,8 @@ manifest-path = "rustbpe/Cargo.toml"
 
 [tool.uv.sources]
 torch = { index = "pytorch-nightly-torch" }
+triton = { index = "pytorch-nightly-triton" }
 
 [[tool.uv.index]]
-name = "pytorch-nightly-torch"
-url = "https://download.pytorch.org/whl/nightly/torch/"
-format = "flat"
-explicit = true
+name = "pytorch-nightly"
+url = "https://download.pytorch.org/whl/nightly/"
