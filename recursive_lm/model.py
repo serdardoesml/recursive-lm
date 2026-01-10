@@ -3,10 +3,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.attention.varlen as attention
 import torch.utils.checkpoint as checkpoint
 from dataclasses import dataclass
 
-from flash_attn import flash_attn_varlen_qkvpacked_func # type: ignore
 # TODO: Add backup attention implementation for non-cuda GPUs, could be useful for local inference and analysis.
 
 @dataclass
@@ -95,13 +95,20 @@ class CausalVarlenSelfAttention(nn.Module):
         qkv[:, 0] = self.norm_qk(apply_rotary_emb(qkv[:, 0], cos, sin))
         qkv[:, 1] = self.norm_qk(apply_rotary_emb(qkv[:, 1], cos, sin))
 
-        out = flash_attn_varlen_qkvpacked_func(
-            qkv=qkv,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
-            dropout_p=0.0, # 0 dropout, not something i expect to use, can be added as hyperparam later
-            causal=True,
-        )  # out: [total_tokens, n_heads, head_dim] 
+        q = qkv[:, 0]
+        k = qkv[:, 1]
+        v = qkv[:, 2]
+
+        out = attention.varlen_attn(
+            query=q,
+            key=k,
+            value=v,
+            cu_seq_q=cu_seqlens,
+            cu_seq_k=cu_seqlens,
+            max_q=max_seqlen,
+            max_k=max_seqlen,
+            is_causal=True,
+        )  # out: [total_tokens, n_heads, head_dim]
 
         out = out.reshape(-1, self.n_hidden)
         return self.Wo(out) # [total_tokens, n_hidden]
