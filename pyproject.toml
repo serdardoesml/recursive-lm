@@ -32,8 +32,7 @@ python-source = "."
 manifest-path = "rustbpe/Cargo.toml"
 
 [tool.uv.sources]
-torch = { index = "pytorch-nightly-torch" }
-triton = { index = "pytorch-nightly-triton" }
+torch = { index = "pytorch-nightly" }
 
 [[tool.uv.index]]
 name = "pytorch-nightly"
