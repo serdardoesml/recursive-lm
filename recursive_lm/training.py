@@ -51,7 +51,8 @@ class TrainingConfig:
     # Does not work with grad checkpointing at least with 2.9.1, seems to be related to dynamic mode.
     # Most likely a bug that will get fixed in a later torch version, might be worth trying later again.
     # Another weird thing is without compilation, 2.4 was faster than 2.9.1 at least on H100s, no idea why.
-    torch_compile: bool = True 
+    # Options: "false", "true", "max-autotune"
+    torch_compile: str = "true" 
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
     model = RecursiveGPT(
@@ -59,8 +60,11 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device)
 
-    if train_config.torch_compile:
-        model = torch.compile(model, dynamic=True, mode="max-autotune-no-cudagraphs") # Cudagraphs do not work
+    if train_config.torch_compile != "false":
+        compile_kwargs = {"dynamic": True}
+        if train_config.torch_compile == "max-autotune":
+            compile_kwargs["mode"] = "max-autotune-no-cudagraphs"  # Cudagraphs do not work
+        model = torch.compile(model, **compile_kwargs)
 
     # Set up param groups.
     # We split params so only recursive block params use Muon, 
@@ -172,7 +176,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 if step == 1:
                     now = time.time()
                     first_step_time = now - start_time
-                    if train_config.torch_compile:
+                    if train_config.torch_compile != "false":
                         print(f"Compile time: {first_step_time:.2f}s")
                     else:
                         print(f"First step time: {first_step_time:.2f}s")
