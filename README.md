@@ -1,5 +1,7 @@
 General code structure inspired heavily from Andrej Karpathy's nanochat and nanogpt repositories.
 
+Switched from FA2 to torch varlen-attn (same backend) to simplify dependencies, however this means torch 2.10 is required.
+
 # Commands
 
 Build rustbpe with:

@@ -1,4 +1,8 @@
-"""Simple training loop, most of the code is boilerplate metrics and initializing stuff."""
+"""
+Simple training loop, most of the code is boilerplate metrics and initializing stuff.
+
+Note: At some point i tried prefetching the batch iterator, does not improve total step time.
+"""
 
 import torch
 import torch.nn.functional as F
@@ -25,7 +29,8 @@ class TrainingConfig:
     # Essentially makes training compute bound, useful for super high depths or large MLP multipliers on small GPUs.
 
     # WARNING: Performance and memory use depends a lot on torch version, not sure how to interpret this. Further testing required.
-    # What is written above applies to torch 2.4 and flash-attn 2.8.3 without compiling, does not seem to work with compile
+    # Overhead becomes even larger when accounting for torch.compile() in dynamic mode breaking with grad checkpointing.
+    # Although that might be fixed with some future torch version.
     grad_checkpointing: bool = False 
 
     # Default target batch size: 65536 tok
@@ -153,7 +158,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             device=device
         ):
             # Everything is bf16 for fast training with A100 and H100s .
-            # Flash-attn doesn't support anything else, so no need to change this really. 
+            # Varlen-attn doesn't support anything else, so no need to change this really. 
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 logits = model(input_ids, cu_seqlens, position_ids)
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))

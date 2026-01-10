@@ -55,7 +55,7 @@ def parquet_doc_segments(parquet_path, token_col="tokens", T=512):
 
 
 def pack_batch(segments, device):
-    """Pack Python-list segments into a FlashAttention-varlen batch.
+    """Pack Python-list segments into a varlen-attn batch.
 
     segments: list[list[int]], each segment length >= 2 and <= T
 

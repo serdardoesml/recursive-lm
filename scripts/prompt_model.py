@@ -50,7 +50,7 @@ def main():
     state = checkpoint["state_dict"]
     config = ModelConfig(**checkpoint["config"])
     model = RecursiveGPT(config)
-    device = "cuda" # Cuda is required due to flash-attn
+    device = "cuda" # Cuda is required due to varlen-attn
     model.load_state_dict(state)
     model.to(device)
     model.eval()
@@ -413,6 +413,6 @@ def main():
 
 
 if __name__ == "__main__":
-    if not torch.cuda.is_available(): # Cuda is required due to flash-attn
+    if not torch.cuda.is_available(): # Cuda is required due to varlen-attn
         raise Exception("Cuda not available!")
     main()

@@ -3,9 +3,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.attention.varlen as attention
 import torch.utils.checkpoint as checkpoint
 from dataclasses import dataclass
+
+# Moved from FA2 to torch.attention.varlen (introduced in torch 2.10) to simplify dependencies. Should be the same backend.
+# TODO: Change dependencies when torch 2.10 stable is released (currently using nightly builds).
+import torch.nn.attention.varlen as attention 
 
 # TODO: Add backup attention implementation for non-cuda GPUs, could be useful for local inference and analysis.
 
@@ -95,14 +98,11 @@ class CausalVarlenSelfAttention(nn.Module):
         qkv[:, 0] = self.norm_qk(apply_rotary_emb(qkv[:, 0], cos, sin))
         qkv[:, 1] = self.norm_qk(apply_rotary_emb(qkv[:, 1], cos, sin))
 
-        q = qkv[:, 0]
-        k = qkv[:, 1]
-        v = qkv[:, 2]
-
+        # We split qkv as torch varlen-attn does not support packed qkv.
         out = attention.varlen_attn(
-            query=q,
-            key=k,
-            value=v,
+            query=qkv[:, 0],
+            key=qkv[:, 1],
+            value=qkv[:, 2],
             cu_seq_q=cu_seqlens,
             cu_seq_k=cu_seqlens,
             max_q=max_seqlen,
