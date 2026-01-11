@@ -144,7 +144,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         wandb.define_metric("*", step_metric="tokens_processed")
 
     profiler = None
+    profiler_started = False
     if train_config.profile:
+        print("Warning: Profile mode enabled!")
         import torch.profiler as profiler_mod
         activities = [profiler_mod.ProfilerActivity.CPU]
         if str(device).startswith("cuda") and torch.cuda.is_available():
@@ -154,7 +156,6 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             record_shapes=True,
             profile_memory=True,
         )
-        profiler.__enter__()
 
     print(
         "Training summary | "
@@ -162,7 +163,6 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         f"total_steps {total_steps} | "
         f"grad_checkpointing {train_config.grad_checkpointing} | "
         f"torch_compile {train_config.torch_compile} | "
-        f"profile {train_config.profile} | "
         f"lr_embed {train_config.lr_embed:.6g} | "
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "
@@ -210,6 +210,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                             print(f"First step time: {first_step_time:.2f}s")
                         start_time = now
                         last_step_time = now
+                        if profiler is not None and not profiler_started:
+                            profiler.__enter__()
+                            profiler_started = True
                     else:
                         now = time.time()
                         last_step_time = report_step(
@@ -225,8 +228,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                             wandb_run,
                         )
 
-                    if profiler is not None:
-                        profiler.step()
+                        if profiler_started:
+                            profiler.step()
 
                     if step >= total_steps:
                         break
@@ -235,7 +238,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             if step >= total_steps:
                 break
     finally:
-        if profiler is not None:
+        if profiler_started:
             profiler.__exit__(None, None, None)
             sort_key = "cuda_time_total" if str(device).startswith("cuda") and torch.cuda.is_available() else "self_cpu_time_total"
             print(
