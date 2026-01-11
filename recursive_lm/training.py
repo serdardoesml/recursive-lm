@@ -59,7 +59,13 @@ class TrainingConfig:
     # Options: "false", "true", "max-autotune"
     torch_compile: str = "true" 
 
+    # Limits step count to 100 and disables saving.
+    profile: bool = False
+
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
+    if train_config.profile:
+        save = False
+
     model = RecursiveGPT(
         train_config.model_config,
         grad_checkpointing=train_config.grad_checkpointing,
@@ -111,6 +117,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         (train_config.max_tok_count * train_config.epoch)
         / (train_config.microbatch_tok * train_config.grad_acc)
     )
+    if train_config.profile:
+        total_steps = min(total_steps, 100)
 
     # Initializing stuff
     step = 0
@@ -135,12 +143,26 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         wandb.define_metric("tokens_processed")
         wandb.define_metric("*", step_metric="tokens_processed")
 
+    profiler = None
+    if train_config.profile:
+        import torch.profiler as profiler_mod
+        activities = [profiler_mod.ProfilerActivity.CPU]
+        if str(device).startswith("cuda") and torch.cuda.is_available():
+            activities.append(profiler_mod.ProfilerActivity.CUDA)
+        profiler = profiler_mod.profile(
+            activities=activities,
+            record_shapes=True,
+            profile_memory=True,
+        )
+        profiler.__enter__()
+
     print(
         "Training summary | "
         f"epochs {train_config.epoch} | "
         f"total_steps {total_steps} | "
         f"grad_checkpointing {train_config.grad_checkpointing} | "
         f"torch_compile {train_config.torch_compile} | "
+        f"profile {train_config.profile} | "
         f"lr_embed {train_config.lr_embed:.6g} | "
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "
@@ -149,65 +171,79 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         f"unrolled params {model.total_unrolled_param_size:,}"
     )
 
-    for epoch_idx in range(train_config.epoch):
-        # Batch iterator re-initializes at each epoch with a different random shuffle
-        for input_ids, targets, cu_seqlens, position_ids in batch_iterator(
-            parquet_path,
-            tokens_per_batch=train_config.microbatch_tok,
-            max_sl=train_config.sequence_len,
-            device=device
-        ):
-            # Everything is bf16 for fast training with A100 and H100s .
-            # Varlen-attn doesn't support anything else, so no need to change this really. 
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                logits = model(input_ids, cu_seqlens, position_ids)
-                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+    try:
+        for epoch_idx in range(train_config.epoch):
+            # Batch iterator re-initializes at each epoch with a different random shuffle
+            for input_ids, targets, cu_seqlens, position_ids in batch_iterator(
+                parquet_path,
+                tokens_per_batch=train_config.microbatch_tok,
+                max_sl=train_config.sequence_len,
+                device=device
+            ):
+                # Everything is bf16 for fast training with A100 and H100s .
+                # Varlen-attn doesn't support anything else, so no need to change this really. 
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    logits = model(input_ids, cu_seqlens, position_ids)
+                    loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
-            # Accumulate gradients
-            loss_float = float(loss.detach())
-            accum_loss += loss_float
-            (loss / train_config.grad_acc).backward()
-            micro_step += 1
+                # Accumulate gradients
+                loss_float = float(loss.detach())
+                accum_loss += loss_float
+                (loss / train_config.grad_acc).backward()
+                micro_step += 1
 
-            if micro_step % train_config.grad_acc == 0:
-                # Optimizer Step
-                if train_config.grad_clip:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.max_grad_norm)
-                opt.step()
-                scheduler.step()
-                step += 1
+                if micro_step % train_config.grad_acc == 0:
+                    # Optimizer Step
+                    if train_config.grad_clip:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.max_grad_norm)
+                    opt.step()
+                    scheduler.step()
+                    step += 1
 
-                # Metrics and logging
-                if step == 1:
-                    now = time.time()
-                    first_step_time = now - start_time
-                    if train_config.torch_compile != "false":
-                        print(f"Compile time: {first_step_time:.2f}s")
+                    # Metrics and logging
+                    if step == 1:
+                        now = time.time()
+                        first_step_time = now - start_time
+                        if train_config.torch_compile != "false":
+                            print(f"Compile time: {first_step_time:.2f}s")
+                        else:
+                            print(f"First step time: {first_step_time:.2f}s")
+                        start_time = now
+                        last_step_time = now
                     else:
-                        print(f"First step time: {first_step_time:.2f}s")
-                    start_time = now
-                    last_step_time = now
-                else:
-                    now = time.time()
-                    last_step_time = report_step(
-                        now,
-                        epoch_idx,
-                        step,
-                        total_steps,
-                        accum_loss,
-                        train_config,
-                        scheduler,
-                        last_step_time,
-                        start_time,
-                        wandb_run,
-                    )
+                        now = time.time()
+                        last_step_time = report_step(
+                            now,
+                            epoch_idx,
+                            step,
+                            total_steps,
+                            accum_loss,
+                            train_config,
+                            scheduler,
+                            last_step_time,
+                            start_time,
+                            wandb_run,
+                        )
 
-                if step >= total_steps:
-                    break
-                opt.zero_grad(set_to_none=True)
-                accum_loss = 0.0
-        if step >= total_steps:
-            break
+                    if profiler is not None:
+                        profiler.step()
+
+                    if step >= total_steps:
+                        break
+                    opt.zero_grad(set_to_none=True)
+                    accum_loss = 0.0
+            if step >= total_steps:
+                break
+    finally:
+        if profiler is not None:
+            profiler.__exit__(None, None, None)
+            sort_key = "cuda_time_total" if str(device).startswith("cuda") and torch.cuda.is_available() else "self_cpu_time_total"
+            print(
+                profiler.key_averages().table(
+                    sort_by=sort_key,
+                    row_limit=30,
+                )
+            )
 
     if save:
         save_model(model, train_config.run_name) 

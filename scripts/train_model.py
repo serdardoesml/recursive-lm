@@ -25,6 +25,7 @@ parser.add_argument("--run_name", type=str, default=TrainingConfig.run_name)
 parser.add_argument("--grad_clip", type=str, choices=["true", "false"], default=TrainingConfig.grad_clip)
 parser.add_argument("--max_grad_norm", type=float, default=TrainingConfig.max_grad_norm)
 parser.add_argument("--sequence_len", type=int, default=TrainingConfig.sequence_len)
+parser.add_argument("--profile", type=str, choices=["true", "false"], default="false")
 
 parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
 parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
@@ -75,6 +76,7 @@ train_config = TrainingConfig(
     run_name=args.run_name or None,
     grad_clip=args.grad_clip == "true",
     max_grad_norm=args.max_grad_norm,
+    profile=args.profile == "true",
     grad_checkpointing=args.grad_checkpointing == "true",
     torch_compile=args.torch_compile,
 )
