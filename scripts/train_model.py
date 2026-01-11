@@ -25,7 +25,6 @@ parser.add_argument("--run_name", type=str, default=TrainingConfig.run_name)
 parser.add_argument("--grad_clip", type=str, choices=["true", "false"], default=TrainingConfig.grad_clip)
 parser.add_argument("--max_grad_norm", type=float, default=TrainingConfig.max_grad_norm)
 parser.add_argument("--sequence_len", type=int, default=TrainingConfig.sequence_len)
-parser.add_argument("--profile", type=str, choices=["true", "false"], default="false")
 
 parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
 parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
@@ -40,7 +39,10 @@ parser.add_argument("--save", type=str, choices=["true", "false"], default="true
 
 # Disable if having issues or constant recompilation, may not work with grad checkpointing
 # Detailed explanation in training.py
-parser.add_argument("--torch_compile", type=str, choices=["true", "false", "max-autotune"], default="true") 
+parser.add_argument("--torch_compile", type=str, choices=["true", "false", "max-autotune"], default="true")
+
+# Limits step count to 100 and disables saving.
+parser.add_argument("--profile", type=str, choices=["true", "false"], default="false")
 
 print_banner()
 
