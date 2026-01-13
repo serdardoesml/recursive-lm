@@ -146,7 +146,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     profiler = None
     profiler_started = False
     if train_config.profile:
-        print("Warning: Profile mode enabled!")
+        print("Warning: Profiling mode enabled!")
         import torch.profiler as profiler_mod
         activities = [profiler_mod.ProfilerActivity.CPU]
         if str(device).startswith("cuda") and torch.cuda.is_available():
@@ -298,6 +298,7 @@ def get_linear_schedule_with_warmup(
 def save_model(model, run_name: str | None):
     # Saves weights and model config directly. 
     # Can be converted to a hf model later with a wrapper using convert_hf.py (Dirty implementation for now)
+    raw_model = model._orig_mod if hasattr(model, "_orig_mod") else model # For compile
     if run_name:
         filename = f"{run_name}.pth"
     else:
@@ -307,8 +308,8 @@ def save_model(model, run_name: str | None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(
         {
-            "state_dict": model.state_dict(),
-            "config": asdict(model.config),
+            "state_dict": raw_model.state_dict(),
+            "config": asdict(raw_model.config),
         },
         path,
     )

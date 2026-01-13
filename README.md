@@ -16,7 +16,7 @@ python -m scripts.train_tokenizer --dataset climbmix100Mwords.txt
 Tokenize data with:
 python -m scripts.tokenize_data --dataset climbmix100Mwords.txt --tokenizer climbmix100Mwords_tokenizer.pkl
 
-Train model with (Requires uv group 'gpu'):
+Train model with:
 python -m scripts.train_model --dataset climbmix100Mwords.parquet
 
 Convert to hf with (Requires uv group 'hf'):
