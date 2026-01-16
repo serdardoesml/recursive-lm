@@ -44,6 +44,7 @@ class TrainingConfig:
     max_tok_count: int = 130300589 # Update when changing dataset or tokenizer
     epoch: int = 10 # 10 epochs by default
     warmup_steps: int = 50
+    cooldown_steps: int = 400
     min_lr_embed: float = 0.0
     min_lr_block: float = 0.0
     use_wandb: bool = False
@@ -130,6 +131,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     scheduler = get_linear_schedule_with_warmup(
         opt,
         num_warmup_steps=train_config.warmup_steps,
+        num_cooldown_steps=train_config.cooldown_steps,
         num_training_steps=total_steps,
         min_lrs=[train_config.min_lr_embed, train_config.min_lr_block],
     )
@@ -256,11 +258,12 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
 def get_linear_schedule_with_warmup(
     optimizer: torch.optim.Optimizer,
     num_warmup_steps: int,
+    num_cooldown_steps: int,
     num_training_steps: int,
     min_lrs: list[float],
     last_epoch: int = -1,
 ):
-    # Simple linear warmup, then linear decay to min_lrs.
+    # Linear warmup, constant phase, then linear cooldown to min_lrs.
     base_lrs = [group["lr"] for group in optimizer.param_groups]
     min_factors = []
     for lr, min_lr in zip(base_lrs, min_lrs, strict=True):
@@ -272,8 +275,9 @@ def get_linear_schedule_with_warmup(
                 raise ValueError(f"min_lr must be in [0, base_lr], got min_lr={min_lr} base_lr={lr}")
         min_factors.append(min_factor)
     warmup_steps = max(0, num_warmup_steps)
+    cooldown_steps = max(0, num_cooldown_steps)
     total_steps = max(1, num_training_steps)
-    decay_steps = max(1, total_steps - warmup_steps)
+    constant_steps = max(0, total_steps - warmup_steps - cooldown_steps)
     warmup_start = 1e-8
 
     # LambdaLR lets us apply separate schedules for embed and block LRs.
@@ -281,10 +285,14 @@ def get_linear_schedule_with_warmup(
         def lr_lambda(step: int):
             if warmup_steps > 0 and step < warmup_steps:
                 return warmup_start + (1.0 - warmup_start) * (step / warmup_steps)
-            decay_step = step - warmup_steps
-            if decay_step >= decay_steps:
+            if step < warmup_steps + constant_steps:
+                return 1.0
+            decay_step = step - warmup_steps - constant_steps
+            if cooldown_steps <= 0:
                 return min_factor
-            decay_progress = decay_step / decay_steps
+            if decay_step >= cooldown_steps:
+                return min_factor
+            decay_progress = decay_step / cooldown_steps
             return (1.0 - decay_progress) * (1.0 - min_factor) + min_factor
         return lr_lambda
 
