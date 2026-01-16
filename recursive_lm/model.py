@@ -72,6 +72,16 @@ class CausalVarlenSelfAttention(nn.Module):
         self.head_dim = config.n_headdim
         self.norm_qk = RMSNorm(self.head_dim)
 
+        # Null-slot mixture (T-like sentinel without fake tokens):
+        # out = alpha * attn_out + (1-alpha) * v_null
+        # alpha depends on both x (pre-attn) and attn_out (post-attn).
+        self.v_null = nn.Parameter(torch.zeros(self.n_head, self.head_dim))
+        self.gate_x = nn.Linear(self.n_hidden, self.n_head, bias=False)
+        self.gate_a = nn.Linear(self.n_hidden, self.n_head, bias=True)
+        nn.init.zeros_(self.gate_x.weight)
+        nn.init.zeros_(self.gate_a.weight)
+        nn.init.constant_(self.gate_a.bias, 4.0) # alpha≈1 at init -> near-baseline behavior
+
         # We register it as a buffer to ensure it gets moved to device together with the model
         self.register_buffer("cos_cache", cos_cache, persistent=False)
         self.register_buffer("sin_cache", sin_cache, persistent=False)
@@ -99,7 +109,7 @@ class CausalVarlenSelfAttention(nn.Module):
         qkv[:, 1] = self.norm_qk(apply_rotary_emb(qkv[:, 1], cos, sin))
 
         # We split qkv as torch varlen-attn does not support packed qkv.
-        out = attention.varlen_attn(
+        attn_out = attention.varlen_attn(
             query=qkv[:, 0],
             key=qkv[:, 1],
             value=qkv[:, 2],
@@ -108,7 +118,11 @@ class CausalVarlenSelfAttention(nn.Module):
             max_q=max_seqlen,
             max_k=max_seqlen,
             is_causal=True,
-        )  # out: [total_tokens, n_heads, head_dim]
+        )  # [total_tokens, n_heads, head_dim]
+
+        # Gate depends on both input x and attention output (merged).
+        gate = torch.sigmoid(self.gate_x(x) + self.gate_a(attn_out.reshape(-1, self.n_hidden))) # [N, H]
+        out = gate.unsqueeze(-1) * attn_out + (1.0 - gate).unsqueeze(-1) * self.v_null.unsqueeze(0) # [N, H, D]
 
         out = out.reshape(-1, self.n_hidden)
         return self.Wo(out) # [total_tokens, n_hidden]
