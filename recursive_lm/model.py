@@ -76,7 +76,12 @@ class CausalVarlenSelfAttention(nn.Module):
         # SDPAElementwiseGate: per-head sigmoid gate applied elementwise to SDPA output.
         self.gate = nn.Linear(self.n_hidden, self.n_head, bias=True)
         nn.init.zeros_(self.gate.weight)
-        nn.init.constant_(self.gate.bias, 4.0) # gate≈1 at init -> near-baseline behavior
+        
+        # Since the gated attention paper finds that the model converges toward a more sparse gate,
+        # we initialize the gate bias with 0.0 (so the sigmoid of the bias is 0.5).
+        # 0.5 is right in the middle, not too high to start with default behavior, not too low to enforce sparsity early on.
+        # TODO: Rewrite this comment more clearly
+        nn.init.constant_(self.gate.bias, 0.0) 
 
         # We register it as a buffer to ensure it gets moved to device together with the model
         self.register_buffer("cos_cache", cos_cache, persistent=False)
