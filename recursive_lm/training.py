@@ -118,6 +118,14 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         ]
     ) # NorMuon optimizer with CWD (References in optimizer.py)
 
+    # Warn if any trainable params are missing from optimizer groups.
+    # I wasted a lot of time forgetting to add params to the lr groups, hopefully this prevents that lol.
+    param_names = {id(p): name for name, p in model.named_parameters()}
+    opt_param_ids = {id(p) for group in opt.param_groups for p in group["params"]}
+    missing = [param_names[id(p)] for p in model.parameters() if id(p) not in opt_param_ids]
+    if missing:
+        print(f"Warning: {len(missing)} params not in optimizer: {', '.join(missing)}")
+
     total_steps = int(
         (train_config.max_tok_count * train_config.epoch)
         / (train_config.microbatch_tok * train_config.grad_acc)

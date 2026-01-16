@@ -73,11 +73,10 @@ class CausalVarlenSelfAttention(nn.Module):
         self.norm_qk = RMSNorm(self.head_dim)
 
         # Gated Attention (https://arxiv.org/pdf/2505.06708)
-        # SDPAElementwiseGate: elementwise (per head-dim) sigmoid gate applied to SDPA output.
-        # Empirically, this should benefit us since we don't use any <|BOS|> token during training,
+        # SDPAHeadwiseGate: per-head sigmoid gate applied to SDPA output.
+        # Empirically, attention gating should benefit us since we don't use any <|BOS|> token during training,
         # meaning the model has no attention sinks. GA should reduce the need for attention sinks.
-        # We also tried adding a null-value to emulate sinks as bias, but that hurt performance.
-        self.gate = nn.Linear(self.n_hidden, self.n_hidden, bias=True)
+        self.gate = nn.Linear(32, self.n_head, bias=True)
         nn.init.zeros_(self.gate.weight)
         
         # Since the gated attention paper finds that the model converges toward a more sparse gate,
@@ -124,7 +123,7 @@ class CausalVarlenSelfAttention(nn.Module):
             is_causal=True,
         )  # [total_tokens, n_heads, head_dim]
 
-        gate = torch.sigmoid(self.gate(x)).view(-1, self.n_head, self.head_dim) # [N, H, D]
+        gate = torch.sigmoid(self.gate(x[:, :32])).view(-1, self.n_head, 1) # [N, H, 1]
         out = attn_out * gate # [N, H, D]
 
         out = out.reshape(-1, self.n_hidden)
