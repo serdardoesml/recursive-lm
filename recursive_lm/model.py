@@ -80,7 +80,7 @@ class CausalVarlenSelfAttention(nn.Module):
         self.gate_a = nn.Linear(self.n_hidden, self.n_head, bias=True)
         nn.init.zeros_(self.gate_x.weight)
         nn.init.zeros_(self.gate_a.weight)
-        nn.init.constant_(self.gate_a.bias, 4.0) # alpha≈1 at init -> near-baseline behavior
+        nn.init.constant_(self.gate_a.bias, -2.0) # alpha≈1 at init -> near-baseline behavior
 
         # We register it as a buffer to ensure it gets moved to device together with the model
         self.register_buffer("cos_cache", cos_cache, persistent=False)
