@@ -76,7 +76,7 @@ class CausalVarlenSelfAttention(nn.Module):
         # SDPAHeadwiseGate: per-head sigmoid gate applied to SDPA output.
         # Empirically, attention gating should benefit us since we don't use any <|BOS|> token during training,
         # meaning the model has no attention sinks. GA should reduce the need for attention sinks.
-        self.gate = nn.Linear(32, self.n_head, bias=True)
+        self.gate = nn.Linear(32, self.n_head, bias=True) # Use first 32 dims only, inspired by modded-nanogpt speedrun
         nn.init.zeros_(self.gate.weight)
         
         # Since the gated attention paper finds that the model converges toward a more sparse gate,
