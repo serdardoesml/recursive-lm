@@ -123,7 +123,7 @@ class CausalVarlenSelfAttention(nn.Module):
             is_causal=True,
         )  # [total_tokens, n_heads, head_dim]
 
-        gate = torch.sigmoid(0.01 * self.gate(x[:, :32])).view(-1, self.n_head, 1) # [N, H, 1]
+        gate = torch.sigmoid(self.gate(x[:, :32])).view(-1, self.n_head, 1) # [N, H, 1]
         out = attn_out * gate # [N, H, D]
 
         out = out.reshape(-1, self.n_hidden)

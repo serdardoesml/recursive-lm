@@ -95,21 +95,21 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             embed_params += list(block.norm_mlp.parameters())
             embed_params += list(block.attn.norm_qk.parameters())
             embed_params.append(block.attn.gate.bias)
+            embed_params.append(block.attn.gate.weight)
         block_params = []
         for block in model.blocks:
             block_params += list(block.attn.Wqkv.parameters())
             block_params += list(block.attn.Wo.parameters())
             block_params += list(block.mlp.parameters())
-            block_params.append(block.attn.gate.weight)
     else:
         embed_params += list(model.recursive_block.norm_attn.parameters())
         embed_params += list(model.recursive_block.norm_mlp.parameters())
         embed_params += list(model.recursive_block.attn.norm_qk.parameters())
         embed_params.append(model.recursive_block.attn.gate.bias)
+        embed_params.append(model.recursive_block.attn.gate.weight)
         block_params = list(model.recursive_block.attn.Wqkv.parameters())
         block_params += list(model.recursive_block.attn.Wo.parameters())
         block_params += list(model.recursive_block.mlp.parameters())
-        block_params.append(model.recursive_block.attn.gate.weight)
 
     opt = SingleDeviceNorMuonWithAuxAdam(
         [
