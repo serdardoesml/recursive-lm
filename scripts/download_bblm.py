@@ -40,6 +40,7 @@ def main():
     ds = load_dataset(dataset_name)
     base_dir = get_base_dir()
     out_path = os.path.join(base_dir, "data", out_name)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     total_docs = 0
     with open(out_path, "w", encoding="utf-8") as fout:

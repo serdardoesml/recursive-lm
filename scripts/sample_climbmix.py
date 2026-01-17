@@ -84,6 +84,7 @@ def main():
 
     base_dir = get_base_dir()
     filename = f"climbmix{target_words_total_str}words.txt"
+    os.makedirs(os.path.join(base_dir, "data"), exist_ok=True)
 
     with open(os.path.join(base_dir, "data", filename), "w", encoding="utf-8") as fout:
         for cid in sorted(CLUSTER_ROWS):

@@ -47,6 +47,7 @@ print(f"Training time: {train_time:.2f}s")
 
 # Save the tokenizer to disk
 tokenizer_dir = os.path.join(base_dir, "tokenizers", os.path.splitext(args.dataset)[0] + "_tokenizer.pkl")
+os.makedirs(os.path.dirname(tokenizer_dir), exist_ok=True)
 tokenizer.save(tokenizer_dir)
 
 # Quick sanity check

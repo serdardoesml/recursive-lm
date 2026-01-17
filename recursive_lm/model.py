@@ -83,6 +83,7 @@ class CausalVarlenSelfAttention(nn.Module):
         # we initialize the gate bias with 0.0 (so the sigmoid of the bias is 0.5).
         # 0.5 is right in the middle, not too high to start with default behavior, not too low to enforce sparsity early on.
         # TODO: Rewrite this comment more clearly
+        # TODO: Re-consider if bias is even necessary
         nn.init.constant_(self.gate.bias, 0.0) 
 
         # We register it as a buffer to ensure it gets moved to device together with the model

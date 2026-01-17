@@ -44,6 +44,7 @@ t0 = time.time()
 docs = []
 lengths = []
 out_path = os.path.join(base_dir, "data", "tokenized", os.path.splitext(args.dataset)[0] + ".parquet")
+os.makedirs(os.path.dirname(out_path), exist_ok=True)
 writer = None
 total_docs = 0
 for doc in raw_text_iterator():
