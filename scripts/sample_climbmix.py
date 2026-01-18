@@ -42,8 +42,8 @@ def clamp_punctuation_runs(text: str) -> str:
 
 
 def abbreviate_words(n: int) -> str:
-    for factor, suffix in ((1_000_000_000_000, "T"), (1_000_000_000, "b"),
-                           (1_000_000, "M"), (1_000, "k")):
+    for factor, suffix in ((1_000_000_000_000, "T"), (1_000_000_000, "B"),
+                           (1_000_000, "M"), (1_000, "K")):
         if n >= factor:
             value = n / factor
             rounded = round(value, 1)
