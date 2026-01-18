@@ -88,7 +88,10 @@ def main() -> int:
     config = ModelConfig(**checkpoint["config"])
     model = RecursiveGPT(config)
     model.load_state_dict(checkpoint["state_dict"])
-    model.to(device)
+    if "cuda" in str(device):
+        model = model.to(device=device, dtype=torch.bfloat16)
+    else:
+        model = model.to(device)
     model.eval()
 
     random_baselines = _load_random_baselines(meta_path)
@@ -96,32 +99,34 @@ def main() -> int:
     results = {}
     centered_results = {}
 
-    for task in tasks:
-        label = task["label"]
-        task_meta = {
-            "task_type": task["icl_task_type"],
-            "dataset_uri": task["dataset_uri"],
-            "num_fewshot": task["num_fewshot"][0] if isinstance(task["num_fewshot"], list) else task["num_fewshot"],
-            "continuation_delimiter": task.get("continuation_delimiter", " "),
-        }
-        data_path = data_base / task_meta["dataset_uri"]
-        if not data_path.exists():
-            print(f"Warning: missing dataset {data_path}, skipping.", file=sys.stderr)
-            continue
+    autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if "cuda" in str(device) else torch.no_grad()
+    with autocast_ctx:
+        for task in tasks:
+            label = task["label"]
+            task_meta = {
+                "task_type": task["icl_task_type"],
+                "dataset_uri": task["dataset_uri"],
+                "num_fewshot": task["num_fewshot"][0] if isinstance(task["num_fewshot"], list) else task["num_fewshot"],
+                "continuation_delimiter": task.get("continuation_delimiter", " "),
+            }
+            data_path = data_base / task_meta["dataset_uri"]
+            if not data_path.exists():
+                print(f"Warning: missing dataset {data_path}, skipping.", file=sys.stderr)
+                continue
 
-        start = time.time()
-        data = _load_jsonl(data_path)
-        accuracy = evaluate_task(model, tokenizer, data, device, task_meta)
-        elapsed = time.time() - start
-        results[label] = accuracy
+            start = time.time()
+            data = _load_jsonl(data_path)
+            accuracy = evaluate_task(model, tokenizer, data, device, task_meta)
+            elapsed = time.time() - start
+            results[label] = accuracy
 
-        if label in random_baselines:
-            baseline = random_baselines[label]
-            centered = (accuracy - 0.01 * baseline) / (1.0 - 0.01 * baseline)
-            centered_results[label] = centered
-            print(f"{label}: acc {accuracy:.4f} | centered {centered:.4f} | {elapsed:.2f}s")
-        else:
-            print(f"{label}: acc {accuracy:.4f} | {elapsed:.2f}s")
+            if label in random_baselines:
+                baseline = random_baselines[label]
+                centered = (accuracy - 0.01 * baseline) / (1.0 - 0.01 * baseline)
+                centered_results[label] = centered
+                print(f"{label}: acc {accuracy:.4f} | centered {centered:.4f} | {elapsed:.2f}s")
+            else:
+                print(f"{label}: acc {accuracy:.4f} | {elapsed:.2f}s")
 
     mean_acc = sum(results.values()) / len(results) if results else 0.0
     core_metric = sum(centered_results.values()) / len(centered_results) if centered_results else None
