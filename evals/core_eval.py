@@ -5,6 +5,7 @@ https://arxiv.org/abs/2406.11794
 Code copied and modified from Nanochat (https://github.com/karpathy/nanochat)
 """
 import random
+import time
 
 from jinja2 import Template
 import torch
@@ -228,7 +229,7 @@ def evaluate_example(idx, model, tokenizer, data, device, task_meta):
     return is_correct
 
 
-def evaluate_task(model, tokenizer, data, device, task_meta):
+def evaluate_task(model, tokenizer, data, device, task_meta, *, progress_every: int = 10, task_label: str | None = None):
     """
     This function is responsible for evaluating one task across many examples.
     It also handles dispatch to all processes if the script is run with torchrun.
@@ -236,10 +237,22 @@ def evaluate_task(model, tokenizer, data, device, task_meta):
     rank = dist.get_rank() if dist.is_initialized() else 0
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     correct = torch.zeros(len(data), dtype=torch.float32, device=device)
+    start_time = time.time()
     # stride the examples to each rank
     for idx in range(rank, len(data), world_size):
         is_correct = evaluate_example(idx, model, tokenizer, data, device, task_meta)
         correct[idx] = float(is_correct)
+        if progress_every and rank == 0:
+            seen = idx + 1
+            if seen % progress_every == 0 or seen == len(data):
+                now = time.time()
+                elapsed = now - start_time
+                rate = seen / elapsed if elapsed > 0 else 0.0
+                remaining = len(data) - seen
+                eta = remaining / rate if rate > 0 else 0.0
+                label = task_label or task_meta.get("dataset_uri", "task")
+                print(f"{label}: {seen}/{len(data)} | {rate:.2f} ex/s | ETA {eta:.1f}s")
+                last_print = now
     # sync results across all the processes if running distributed
     if world_size > 1:
         dist.barrier()

@@ -116,7 +116,7 @@ def main() -> int:
 
             start = time.time()
             data = _load_jsonl(data_path)
-            accuracy = evaluate_task(model, tokenizer, data, device, task_meta)
+            accuracy = evaluate_task(model, tokenizer, data, device, task_meta, task_label=label)
             elapsed = time.time() - start
             results[label] = accuracy
 
