@@ -10,6 +10,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, help='Dataset filename (Has to be located under data directory)')
 parser.add_argument('--tokenizer', type=str, help='Tokenizer filename (Has to be located under tokenizers directory)')
 parser.add_argument('--max_chars', type=int, default=10_000_000_000, help='Maximum characters to tokenize (default: 10B)')
+parser.add_argument('--batch_size', type=int, default=1024, help='Documents per encode batch (default: 1024)')
+parser.add_argument('--num_threads', type=int, default=8, help='Threads for batch encoding (default: 8)')
 
 args = parser.parse_args()
 
@@ -43,15 +45,20 @@ def raw_text_iterator():
 t0 = time.time()
 docs = []
 lengths = []
+raw_docs = []
 out_path = os.path.join(base_dir, "data", "tokenized", os.path.splitext(args.dataset)[0] + ".parquet")
 os.makedirs(os.path.dirname(out_path), exist_ok=True)
 writer = None
 total_docs = 0
 for doc in raw_text_iterator():
-    tokens = tok.encode(doc)
-    docs.append(tokens)
-    lengths.append(len(tokens))
-    total_docs += 1
+    raw_docs.append(doc)
+    if len(raw_docs) >= args.batch_size:
+        token_batches = tok.encode(raw_docs, num_threads=args.num_threads)
+        for tokens in token_batches:
+            docs.append(tokens)
+            lengths.append(len(tokens))
+        total_docs += len(raw_docs)
+        raw_docs.clear()
 
     if len(docs) >= 10_000:  # write in chunks to avoid holding everything in memory
         table = pa.Table.from_arrays([pa.array(docs), pa.array(lengths)], names=["tokens", "length"])
@@ -60,6 +67,13 @@ for doc in raw_text_iterator():
         writer.write_table(table, row_group_size=4)
         docs.clear()
         lengths.clear()
+
+if raw_docs:
+    token_batches = tok.encode(raw_docs, num_threads=args.num_threads)
+    for tokens in token_batches:
+        docs.append(tokens)
+        lengths.append(len(tokens))
+    total_docs += len(raw_docs)
 
 if docs:
     table = pa.Table.from_arrays([pa.array(docs), pa.array(lengths)], names=["tokens", "length"])
