@@ -229,7 +229,7 @@ def evaluate_example(idx, model, tokenizer, data, device, task_meta):
     return is_correct
 
 
-def evaluate_task(model, tokenizer, data, device, task_meta, *, progress_every: int = 10, task_label: str | None = None):
+def evaluate_task(model, tokenizer, data, device, task_meta, *, progress_every: int = 200, task_label: str | None = None):
     """
     This function is responsible for evaluating one task across many examples.
     It also handles dispatch to all processes if the script is run with torchrun.
@@ -238,6 +238,7 @@ def evaluate_task(model, tokenizer, data, device, task_meta, *, progress_every: 
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     correct = torch.zeros(len(data), dtype=torch.float32, device=device)
     start_time = time.time()
+    last_time = start_time
     # stride the examples to each rank
     for idx in range(rank, len(data), world_size):
         is_correct = evaluate_example(idx, model, tokenizer, data, device, task_meta)
@@ -246,13 +247,13 @@ def evaluate_task(model, tokenizer, data, device, task_meta, *, progress_every: 
             seen = idx + 1
             if seen % progress_every == 0 or seen == len(data):
                 now = time.time()
-                elapsed = now - start_time
-                rate = seen / elapsed if elapsed > 0 else 0.0
+                elapsed = now - last_time
+                rate = progress_every / elapsed if elapsed > 0 else 0.0
                 remaining = len(data) - seen
                 eta = remaining / rate if rate > 0 else 0.0
                 label = task_label or task_meta.get("dataset_uri", "task")
                 print(f"{label}: {seen}/{len(data)} | {rate:.2f} ex/s | ETA {eta:.1f}s")
-                last_print = now
+                last_time = now
     # sync results across all the processes if running distributed
     if world_size > 1:
         dist.barrier()
