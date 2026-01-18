@@ -135,9 +135,8 @@ def batch_sequences_lm(tokenizer, prompts):
     return [tokens_with], [start_idx], [end_idx]
 
 
-@torch.no_grad()
-def evaluate_example(idx, model, tokenizer, data, device, task_meta):
-    """Evaluate a single example, return True if correct, False otherwise"""
+def _prepare_example(idx, model, tokenizer, data, task_meta):
+    """Prepare one example: tokenize prompts and return per-seq spans and metadata."""
     item = data[idx]
     task_type = task_meta['task_type']
     num_fewshot = task_meta['num_fewshot']
@@ -185,51 +184,106 @@ def evaluate_example(idx, model, tokenizer, data, device, task_meta):
                 new_end_idxs.append(e)
         tokens, start_idxs, end_idxs = new_tokens, new_start_idxs, new_end_idxs
 
-    # Pack sequences into varlen-attn format
-    flat_input, cu_seqlens, position_ids, _lengths, offsets = pack_varlen(tokens, device=device)
+    sequences = []
+    for i, (t, s, e) in enumerate(zip(tokens, start_idxs, end_idxs)):
+        sequences.append({
+            "tokens": t,
+            "start": s,
+            "end": e,
+            "choice_idx": i,
+        })
 
-    # Forward the model, get flat logits for every token
+    return {
+        "task_type": task_type,
+        "gold": item.get("gold", None),
+        "sequences": sequences,
+    }
+
+
+def _evaluate_batch(prepared_examples, model, device):
+    """Evaluate a batch of prepared examples. Returns dict of idx -> correctness."""
+    if not prepared_examples:
+        return {}
+
+    sequences = []
+    seq_meta = []
+    example_info = {}
+    for ex_idx, prep in prepared_examples:
+        seqs = prep["sequences"]
+        example_info[ex_idx] = {
+            "task_type": prep["task_type"],
+            "gold": prep["gold"],
+            "scores": [None] * len(seqs),
+        }
+        for seq in seqs:
+            sequences.append(seq["tokens"])
+            seq_meta.append({
+                "ex_idx": ex_idx,
+                "choice_idx": seq["choice_idx"],
+                "start": seq["start"],
+                "end": seq["end"],
+                "task_type": prep["task_type"],
+            })
+
+    flat_input, cu_seqlens, position_ids, _lengths, offsets = pack_varlen(sequences, device=device)
     logits = forward_logits(model, flat_input, cu_seqlens, position_ids)
 
-    # Build flat targets (next-token prediction within each sequence)
     targets: list[int] = []
-    for seq in tokens:
+    for seq in sequences:
         if len(seq) == 0:
             continue
         targets.extend(seq[1:])
-        targets.append(-100)  # ignore last token in each sequence
+        targets.append(-100)
     targets_t = torch.tensor(targets, dtype=torch.long, device=flat_input.device)
 
-    # Per-token loss and predictions
     losses = F.cross_entropy(logits, targets_t, reduction="none", ignore_index=-100)
     predictions = logits.argmax(dim=-1)
 
-    # See if the losses/predictions come out correctly
-    if task_type == 'language_modeling':
-        # language modeling task is currently always batch size 1
-        si = start_idxs[0]
-        ei = end_idxs[0]
-        # predictions[i] predict input_ids[i+1] autoregressively
-        off = offsets[0]
-        predicted_tokens = predictions[off + si - 1 : off + ei - 1]
-        actual_tokens = flat_input[off + si : off + ei]
-        is_correct = torch.all(predicted_tokens == actual_tokens).item()
-    elif task_type in ['multiple_choice', 'schema']:
-        # For MC/schema: find the option with lowest average loss
-        mean_losses = []
-        for i, (si, ei) in enumerate(zip(start_idxs, end_idxs)):
-            off = offsets[i]
+    for i, meta in enumerate(seq_meta):
+        off = offsets[i]
+        si = meta["start"]
+        ei = meta["end"]
+        if meta["task_type"] == "language_modeling":
+            predicted_tokens = predictions[off + si - 1 : off + ei - 1]
+            actual_tokens = flat_input[off + si : off + ei]
+            correct = torch.all(predicted_tokens == actual_tokens).item()
+            example_info[meta["ex_idx"]]["scores"][meta["choice_idx"]] = float(correct)
+        else:
             span = losses[off + si - 1 : off + ei - 1]
-            mean_losses.append(span.mean().item())
-        pred_idx = mean_losses.index(min(mean_losses))
-        is_correct = pred_idx == item['gold']
-    else:
-        raise ValueError(f"Unsupported task type: {task_type}")
+            example_info[meta["ex_idx"]]["scores"][meta["choice_idx"]] = span.mean().item()
+
+    results = {}
+    for ex_idx, info in example_info.items():
+        if info["task_type"] == "language_modeling":
+            results[ex_idx] = bool(info["scores"][0])
+        else:
+            pred_idx = info["scores"].index(min(info["scores"]))
+            results[ex_idx] = pred_idx == info["gold"]
+
+    return results
+
+
+@torch.no_grad()
+def evaluate_example(idx, model, tokenizer, data, device, task_meta):
+    """Evaluate a single example, return True if correct, False otherwise"""
+    prep = _prepare_example(idx, model, tokenizer, data, task_meta)
+    out = _evaluate_batch([(idx, prep)], model, device)
+    return out[idx]
 
     return is_correct
 
 
-def evaluate_task(model, tokenizer, data, device, task_meta, *, progress_every: int = 200, task_label: str | None = None):
+def evaluate_task(
+    model,
+    tokenizer,
+    data,
+    device,
+    task_meta,
+    *,
+    progress_every: int = 200,
+    task_label: str | None = None,
+    max_batch_tokens: int = 0,
+):
     """
     This function is responsible for evaluating one task across many examples.
     It also handles dispatch to all processes if the script is run with torchrun.
@@ -238,22 +292,48 @@ def evaluate_task(model, tokenizer, data, device, task_meta, *, progress_every: 
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     correct = torch.zeros(len(data), dtype=torch.float32, device=device)
     start_time = time.time()
-    last_time = start_time
-    # stride the examples to each rank
-    for idx in range(rank, len(data), world_size):
-        is_correct = evaluate_example(idx, model, tokenizer, data, device, task_meta)
-        correct[idx] = float(is_correct)
+    window_count = 0
+    window_start = start_time
+    indices = list(range(rank, len(data), world_size))
+    total_local = len(indices)
+    i = 0
+    while i < total_local:
+        if max_batch_tokens and max_batch_tokens > 0:
+            batch = []
+            token_count = 0
+            while i < total_local:
+                idx = indices[i]
+                prep = _prepare_example(idx, model, tokenizer, data, task_meta)
+                seq_tokens = sum(len(s["tokens"]) for s in prep["sequences"])
+                if batch and token_count + seq_tokens > max_batch_tokens:
+                    break
+                batch.append((idx, prep))
+                token_count += seq_tokens
+                i += 1
+            batch_results = _evaluate_batch(batch, model, device)
+            for ex_idx, is_correct in batch_results.items():
+                correct[ex_idx] = float(is_correct)
+            batch_size = len(batch)
+        else:
+            idx = indices[i]
+            is_correct = evaluate_example(idx, model, tokenizer, data, device, task_meta)
+            correct[idx] = float(is_correct)
+            batch_size = 1
+            i += 1
+
         if progress_every and rank == 0:
-            seen = idx + 1
-            if seen % progress_every == 0 or seen == len(data):
+            window_count += batch_size
+            seen = i
+            if window_count >= progress_every or seen == total_local:
                 now = time.time()
-                elapsed = now - last_time
-                rate = progress_every / elapsed if elapsed > 0 else 0.0
-                remaining = len(data) - seen
+                elapsed = now - window_start
+                rate = window_count / elapsed if elapsed > 0 else 0.0
+                remaining = total_local - seen
                 eta = remaining / rate if rate > 0 else 0.0
                 label = task_label or task_meta.get("dataset_uri", "task")
-                print(f"{label}: {seen}/{len(data)} | {rate:.2f} ex/s | ETA {eta:.1f}s")
-                last_time = now
+                print(f"{label}: {seen}/{total_local} | {rate:.2f} ex/s | ETA {eta:.1f}s")
+                window_count = 0
+                window_start = now
     # sync results across all the processes if running distributed
     if world_size > 1:
         dist.barrier()

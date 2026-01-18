@@ -44,6 +44,7 @@ def main() -> int:
     parser.add_argument("--model", required=True, help="Model filename under models/")
     parser.add_argument("--tokenizer", required=True, help="Tokenizer filename under tokenizers/")
     parser.add_argument("--device", default=None, help="Device (e.g. cuda, cuda:0, cpu).")
+    parser.add_argument("--max-batch-tokens", type=int, default=8192, help="Max tokens per eval batch (0 to disable).")
     args = parser.parse_args()
 
     base_dir = get_base_dir()
@@ -116,7 +117,15 @@ def main() -> int:
 
             start = time.time()
             data = _load_jsonl(data_path)
-            accuracy = evaluate_task(model, tokenizer, data, device, task_meta, task_label=label)
+            accuracy = evaluate_task(
+                model,
+                tokenizer,
+                data,
+                device,
+                task_meta,
+                task_label=label,
+                max_batch_tokens=args.max_batch_tokens,
+            )
             elapsed = time.time() - start
             results[label] = accuracy
 
