@@ -1,10 +1,11 @@
-# Tokenizer code copied and cleaned up from nanochat.
-# Only relevant functions were kept, comments are mostly unchanged.
+"""
+Tokenizer code copied and cleaned up from nanochat. (https://github.com/karpathy/nanochat)
+Only relevant functions were kept, comments are mostly unchanged.
+"""
+
 import pickle
 import rustbpe
 import tiktoken
-import os
-import copy
 from functools import lru_cache
 
 SPECIAL_TOKENS = [

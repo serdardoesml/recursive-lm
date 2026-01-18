@@ -9,4 +9,6 @@ eval_bundle/
 data/*
 analysis/*
 models/*
+evals/data/*
+evals/logs/*
 
