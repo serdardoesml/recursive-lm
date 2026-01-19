@@ -161,7 +161,7 @@ class MoE(nn.Module):
         self.aux_loss = 0.0 # Aux loss extracted directly by training script, not that logically clean but keeps code readable
 
         # Init router bias as 0
-        nn.init.zeros_(self.router.bias, 0.0)
+        nn.init.zeros_(self.router.bias)
 
     def forward(self, x, training):
         # x: [total_tokens, n_hidden]
