@@ -26,7 +26,7 @@ class RecursiveLMConfig(PretrainedConfig):
         n_head: int = ModelConfig.n_head,
         n_hidden: int = ModelConfig.n_hidden,
         n_wembed: int = ModelConfig.n_wembed,
-        mlp_mul: int = ModelConfig.mlp_mul,
+        n_mlp_intermediate: int = ModelConfig.n_mlp_intermediate,
         rec_depth: int = ModelConfig.rec_depth,
         tie_embed: bool = ModelConfig.tie_embed,
         rope_cache_len: int = ModelConfig.rope_cache_len,
@@ -48,7 +48,7 @@ class RecursiveLMConfig(PretrainedConfig):
         self.n_head = n_head
         self.n_hidden = n_hidden
         self.n_wembed = n_wembed
-        self.mlp_mul = mlp_mul
+        self.n_mlp_intermediate = n_mlp_intermediate
         self.rec_depth = rec_depth
         self.tie_embed = tie_embed
         self.rope_cache_len = rope_cache_len
@@ -63,7 +63,7 @@ class RecursiveLMConfig(PretrainedConfig):
             n_head=self.n_head,
             n_hidden=self.n_hidden,
             n_wembed=self.n_wembed,
-            mlp_mul=self.mlp_mul,
+            n_mlp_intermediate=self.n_mlp_intermediate,
             rec_depth=self.rec_depth,
             tie_embed=self.tie_embed,
             rope_cache_len=self.rope_cache_len,

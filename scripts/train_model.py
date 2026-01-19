@@ -14,6 +14,7 @@ parser.add_argument("--min_lr_embed", type=float, default=TrainingConfig.min_lr_
 parser.add_argument("--min_lr_block", type=float, default=TrainingConfig.min_lr_block)
 parser.add_argument("--wd_adam", type=float, default=TrainingConfig.wd_adam)
 parser.add_argument("--wd_muon", type=float, default=TrainingConfig.wd_muon)
+parser.add_argument("--lb_coef", type=float, default=TrainingConfig.lb_coef)
 parser.add_argument("--microbatch_tok", type=int, default=TrainingConfig.microbatch_tok)
 parser.add_argument("--grad_acc", type=int, default=TrainingConfig.grad_acc)
 parser.add_argument("--max_tok_count", type=int, default=TrainingConfig.max_tok_count)
@@ -31,7 +32,9 @@ parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
 parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
 parser.add_argument("--n_hidden", type=int, default=ModelConfig.n_hidden)
 parser.add_argument("--n_wembed", type=int, default=ModelConfig.n_wembed)
-parser.add_argument("--mlp_mul", type=int, default=ModelConfig.mlp_mul)
+parser.add_argument("--n_expert", type=int, default=ModelConfig.n_expert)
+parser.add_argument("--top_k", type=int, default=ModelConfig.top_k)
+parser.add_argument("--n_mlp_intermediate", type=int, default=ModelConfig.n_mlp_intermediate)
 parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
 parser.add_argument("--tie_embed", type=str, choices=["true", "false"], default=ModelConfig.tie_embed)
 parser.add_argument("--standard_gpt", type=str, choices=["true", "false"], default="false") # For experiments
@@ -54,7 +57,9 @@ model_config = ModelConfig(
     n_head=args.n_head,
     n_hidden=args.n_hidden,
     n_wembed=args.n_wembed,
-    mlp_mul=args.mlp_mul,
+    n_expert=args.n_expert,
+    top_k=args.top_k,
+    n_mlp_intermediate=args.n_mlp_intermediate,
     rec_depth=args.rec_depth,
     tie_embed=args.tie_embed == "true",
     standard_gpt=args.standard_gpt == "true",
@@ -68,6 +73,7 @@ train_config = TrainingConfig(
     min_lr_block=args.min_lr_block,
     wd_adam=args.wd_adam,
     wd_muon=args.wd_muon,
+    lb_coef=args.lb_coef,
     microbatch_tok=args.microbatch_tok,
     grad_acc=args.grad_acc,
     sequence_len=args.sequence_len,

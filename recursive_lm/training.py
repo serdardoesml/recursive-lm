@@ -7,7 +7,7 @@ Note: At some point i tried prefetching the batch iterator, does not improve tot
 import torch
 import torch.nn.functional as F
 from .optimizer import SingleDeviceNorMuonWithAuxAdam
-from .model import RecursiveGPT, ModelConfig
+from .model import RecursiveGPT, ModelConfig, MoE
 from .dataloader import batch_iterator
 from .common import get_base_dir
 
@@ -23,6 +23,7 @@ class TrainingConfig:
     lr_block: float = 0.02 # Muon requires higher learning rate.
     wd_adam: float = 0.005
     wd_muon: float = 0.1
+    lb_coef: float = 1e-2
 
     # MASSIVE reduction in memory use with grad checkpointing as it allows almost O(1) memory complexity for depth.
     # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
@@ -71,7 +72,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         train_config.model_config,
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device)
-
+    moe_modules = [m for m in model.modules() if isinstance(m, MoE)]
     if train_config.torch_compile != "false":
         compile_kwargs = {"dynamic": True}
         if train_config.torch_compile == "max-autotune":
@@ -95,20 +96,22 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             embed_params += list(block.norm_mlp.parameters())
             embed_params += list(block.attn.norm_qk.parameters())
             embed_params.append(block.attn.gate.bias)
+            embed_params.append(block.moe.router.bias)
         block_params = []
         for block in model.blocks:
             block_params += list(block.attn.Wqkv.parameters())
             block_params += list(block.attn.Wo.parameters())
-            block_params += list(block.mlp.parameters())
+            block_params += list(block.moe.parameters())
             block_params.append(block.attn.gate.weight)
     else:
         embed_params += list(model.recursive_block.norm_attn.parameters())
         embed_params += list(model.recursive_block.norm_mlp.parameters())
         embed_params += list(model.recursive_block.attn.norm_qk.parameters())
         embed_params.append(model.recursive_block.attn.gate.bias)
+        embed_params.append(model.recursive_block.moe.router.bias)
         block_params = list(model.recursive_block.attn.Wqkv.parameters())
         block_params += list(model.recursive_block.attn.Wo.parameters())
-        block_params += list(model.recursive_block.mlp.parameters())
+        block_params += list(model.recursive_block.moe.parameters())
         block_params.append(model.recursive_block.attn.gate.weight)
 
     opt = SingleDeviceNorMuonWithAuxAdam(
@@ -181,8 +184,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "
         f"wd_muon {train_config.wd_muon:.6g} | "
-        f"distinct params {model.total_param_size:,} | "
-        f"unrolled params {model.total_unrolled_param_size:,}"
+        f"distinct params {model.total_param_size:,}"
     )
 
     try:
@@ -196,9 +198,13 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             ):
                 # Everything is bf16 for fast training with A100 and H100s .
                 # Varlen-attn doesn't support anything else, so no need to change this really. 
+                for m in moe_modules:
+                    m.aux_loss = 0.0
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    logits = model(input_ids, cu_seqlens, position_ids)
+                    logits = model(input_ids, cu_seqlens, position_ids, True)
                     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+                    lb_loss = sum(m.aux_loss for m in moe_modules)
+                    loss = loss + (train_config.lb_coef * lb_loss)
 
                 # Accumulate gradients
                 loss_float = float(loss.detach())

@@ -18,7 +18,9 @@ class ModelConfig:
     n_head: int = 16 # number of attention heads
     n_hidden: int = 384
     n_wembed: int = 128
-    mlp_mul: int = 16
+    n_expert: int = 4
+    top_k: int = 2
+    n_mlp_intermediate: int = 1536
     rec_depth: int = 24
     tie_embed: bool = False # Tied embeddings greatly hurt performance on recursive mode
     rope_cache_len: int = 16384
@@ -134,9 +136,9 @@ class CausalVarlenSelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_hidden, config.n_hidden * config.mlp_mul, bias=False)
-        self.c_gate = nn.Linear(config.n_hidden, config.n_hidden * config.mlp_mul, bias=False)
-        self.c_proj = nn.Linear(config.n_hidden * config.mlp_mul, config.n_hidden, bias=False)
+        self.c_fc = nn.Linear(config.n_hidden, config.n_mlp_intermediate, bias=False)
+        self.c_gate = nn.Linear(config.n_hidden, config.n_mlp_intermediate, bias=False)
+        self.c_proj = nn.Linear(config.n_mlp_intermediate, config.n_hidden, bias=False)
         nn.init.zeros_(self.c_proj.weight) # Zero init (Idea from modded-nanogpt speedrun, empirically seems to work well)
 
     def forward(self, x):
@@ -146,21 +148,65 @@ class MLP(nn.Module):
         x = F.silu(x_gate) * x_fc # SwiGLU, improved training speed a lot from ReLU^2, so we keep it
         x = self.c_proj(x)
         return x
+
+
+class MoE(nn.Module):
+    # Standard MoE layer (for now), no shared experts.
+    def __init__(self, config):
+        super().__init__()
+        self.top_k = config.top_k
+        self.n_expert = config.n_expert
+        self.router = nn.Linear(config.n_hidden, self.n_expert, bias=True)
+        self.experts = nn.ModuleList([MLP(config) for _ in range(self.n_expert)])
+        self.aux_loss = 0.0 # Aux loss extracted directly by training script, not that logically clean but keeps code readable
+
+        # Init router bias as 0
+        nn.init.zeros_(self.router.bias, 0.0)
+
+    def forward(self, x, training):
+        # x: [total_tokens, n_hidden]
+        router_logits = self.router(x) # [N, n_expert]
+        router_probs = F.softmax(router_logits, dim=-1) # [N, n_expert]
+        topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k) # [N, k]
+        topk_gates = F.softmax(topk_vals, dim=-1) # Per-token mix weights over top-k
+
+        # Auxiliary loss to keep experts balanced (Only calculate if training)
+        if training:
+            importance = router_probs.mean(dim=0) # [n_expert]
+            load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert).to(router_probs.dtype)
+            load = load / topk_idx.numel()
+            self.aux_loss = self.aux_loss + (self.n_expert * torch.sum(importance * load))
+
+        n_tokens = x.shape[0]
+        flat_idx = topk_idx.reshape(-1) # [N*k] expert id for each (token, k)
+        flat_gate = topk_gates.reshape(-1) # [N*k] gate for each (token, k)
+        flat_token = torch.arange(n_tokens, device=x.device).unsqueeze(1).expand(n_tokens, self.top_k).reshape(-1) # [N*k] token ids
+
+        out = x.new_zeros((n_tokens, x.shape[-1]))
+        for expert_id in range(self.n_expert):
+            mask = flat_idx == expert_id
+            token_idx = flat_token[mask]
+            expert_in = x[token_idx] # [n_routed, n_hidden] tokens assigned to this expert
+            expert_out = self.experts[expert_id](expert_in)
+            expert_out = expert_out * flat_gate[mask].to(dtype=expert_out.dtype).unsqueeze(-1) # apply per-token gate
+            out.index_add_(0, token_idx, expert_out) # [N, d] Sums outputs back into residual shape
+
+        return out
     
 class Block(nn.Module):
     def __init__(self, config, cos_cache, sin_cache):
         super().__init__()
         self.attn = CausalVarlenSelfAttention(config, cos_cache, sin_cache)
-        self.mlp = MLP(config)
+        self.moe = MoE(config)
         self.norm_attn = RMSNorm(config.n_hidden)
         self.norm_mlp = RMSNorm(config.n_hidden)
 
-    def forward(self, x, cu_seqlens, max_seqlen, position_ids):
+    def forward(self, x, cu_seqlens, max_seqlen, position_ids, training):
         # We do pre-norm and QK norm. 
         # We used to do a Gemma 3 style post-norm, but removed it to improve stability 
         # and keep the residual stream norm in check. Seems to work fine.
         x = x + self.attn(self.norm_attn(x), cu_seqlens, max_seqlen, position_ids)
-        x = x + self.mlp(self.norm_mlp(x))
+        x = x + self.moe(self.norm_mlp(x), training)
         return x
 
 
@@ -213,39 +259,32 @@ class RecursiveGPT(nn.Module):
             self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_hidden)
             nn.init.zeros_(self.rec_layer_embedding.weight) 
 
-    @property
-    def total_param_size(self) -> int:
-        return sum(p.numel() for p in self.parameters())
-
-    @property
-    def total_unrolled_param_size(self) -> int:
-        if self.config.standard_gpt:
-            return self.total_param_size
-        block_params = sum(p.numel() for p in self.recursive_block.parameters())
-        return self.total_param_size + (self.config.rec_depth - 1) * block_params
-
-    def forward_hidden(self, input_ids, cu_seqlens, position_ids):
+    def forward_hidden(self, input_ids, cu_seqlens, position_ids, training=False):
         # input_ids: [total_tokens] (flattened)
         x = self.e_to_h(self.embedding(input_ids))  # [total_tokens, n_hidden]
         if self.config.standard_gpt:
             for i in range(self.config.rec_depth):
-                x = self.blocks[i](x, cu_seqlens, self.config.rope_cache_len, position_ids)
+                x = self.blocks[i](x, cu_seqlens, self.config.rope_cache_len, position_ids, training)
         else:
             for i in range(self.config.rec_depth):
                 if self.grad_checkpointing:
-                    def recursive_step(x, cu_seqlens, position_ids, i=i):
+                    def recursive_step(x, cu_seqlens, position_ids, training, i=i):
                         x = x + self.rec_layer_embedding.weight[i]
-                        return self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids)
+                        return self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, training)
 
-                    x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, use_reentrant=False)
+                    x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, training, use_reentrant=False)
                 else:
                     x = x + self.rec_layer_embedding.weight[i]
-                    x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids)
+                    x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, training)
         return x
 
-    def forward(self, input_ids, cu_seqlens, position_ids):
-        x = self.forward_hidden(input_ids, cu_seqlens, position_ids)
+    def forward(self, input_ids, cu_seqlens, position_ids, training=False):
+        x = self.forward_hidden(input_ids, cu_seqlens, position_ids, training)
         if not self.config.tie_embed:
             return self.lm_head(self.norm_out(self.h_to_e(x))) # [total_tokens, vocab_size]
         else:
             return F.linear(self.norm_out(self.h_to_e(x)), self.embedding.weight) # [total_tokens, vocab_size]
+        
+    @property
+    def total_param_size(self) -> int:
+        return sum(p.numel() for p in self.parameters())
