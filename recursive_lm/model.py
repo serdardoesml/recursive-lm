@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
+from scattermoe.mlp import GLUMLP # fast MoE (https://arxiv.org/pdf/2403.08245)
 from dataclasses import dataclass
 
 # Moved from FA2 to torch.attention.varlen (introduced in torch 2.10) to simplify dependencies. Should be the same backend.
@@ -133,23 +134,6 @@ class CausalVarlenSelfAttention(nn.Module):
         return self.Wo(out) # [total_tokens, n_hidden]
     
 
-class MLP(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.c_fc = nn.Linear(config.n_hidden, config.n_mlp_intermediate, bias=False)
-        self.c_gate = nn.Linear(config.n_hidden, config.n_mlp_intermediate, bias=False)
-        self.c_proj = nn.Linear(config.n_mlp_intermediate, config.n_hidden, bias=False)
-        nn.init.zeros_(self.c_proj.weight) # Zero init (Idea from modded-nanogpt speedrun, empirically seems to work well)
-
-    def forward(self, x):
-        # x: [total_tokens, n_hidden]
-        x_fc = self.c_fc(x)
-        x_gate = self.c_gate(x)
-        x = F.silu(x_gate) * x_fc # SwiGLU, improved training speed a lot from ReLU^2, so we keep it
-        x = self.c_proj(x)
-        return x
-
-
 class MoE(nn.Module):
     # Standard MoE layer (for now), no shared experts.
     def __init__(self, config):
@@ -157,7 +141,12 @@ class MoE(nn.Module):
         self.top_k = config.top_k
         self.n_expert = config.n_expert
         self.router = nn.Linear(config.n_hidden, self.n_expert, bias=True)
-        self.experts = nn.ModuleList([MLP(config) for _ in range(self.n_expert)])
+        self.experts = GLUMLP( 
+            input_size=config.n_hidden,
+            hidden_size=config.n_mlp_intermediate,
+            num_experts=self.n_expert,
+            top_k=self.top_k,
+        )
         self.aux_loss = 0.0 # Aux loss extracted directly by training script, not that logically clean but keeps code readable
 
         # Init router bias as 0
@@ -168,6 +157,8 @@ class MoE(nn.Module):
         router_logits = self.router(x) # [N, n_expert]
         router_probs = F.softmax(router_logits, dim=-1) # [N, n_expert]
         topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k) # [N, k]
+        topk_idx = topk_idx.to(torch.int32)
+
         topk_gates = F.softmax(topk_vals, dim=-1) # Per-token mix weights over top-k
 
         # Auxiliary loss to keep experts balanced (Only calculate if training)
@@ -177,21 +168,7 @@ class MoE(nn.Module):
             load = load / topk_idx.numel()
             self.aux_loss = self.aux_loss + (self.n_expert * torch.sum(importance * load))
 
-        n_tokens = x.shape[0]
-        flat_idx = topk_idx.reshape(-1) # [N*k] expert id for each (token, k)
-        flat_gate = topk_gates.reshape(-1) # [N*k] gate for each (token, k)
-        flat_token = torch.arange(n_tokens, device=x.device).unsqueeze(1).expand(n_tokens, self.top_k).reshape(-1) # [N*k] token ids
-
-        out = x.new_zeros((n_tokens, x.shape[-1]), dtype=torch.bfloat16)
-        for expert_id in range(self.n_expert):
-            mask = flat_idx == expert_id
-            token_idx = flat_token[mask]
-            expert_in = x[token_idx] # [n_routed, n_hidden] tokens assigned to this expert
-            expert_out = self.experts[expert_id](expert_in)
-            expert_out = expert_out * flat_gate[mask].to(dtype=expert_out.dtype).unsqueeze(-1) # apply per-token gate
-            out.index_add_(0, token_idx, expert_out) # [N, d] Sums outputs back into residual shape
-
-        return out
+        return self.experts(x, topk_gates, topk_idx)
     
 class Block(nn.Module):
     def __init__(self, config, cos_cache, sin_cache):
