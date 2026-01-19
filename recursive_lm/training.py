@@ -74,7 +74,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     ).to(device) # Init model and move to device
 
     moe_modules = []
-    for m in model.modules:
+    for m in model.modules():
         if isinstance(m, MoE):
             m.to(torch.bfloat16) # ScatterMoE doesn't autocast
             moe_modules.append(m) # Keep track for aux loss
