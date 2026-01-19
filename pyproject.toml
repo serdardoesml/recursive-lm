@@ -13,7 +13,6 @@ dependencies = [
     "tiktoken>=0.12.0",
     "torch==2.10.0.dev20251213+cu126",
     "wandb>=0.23.1",
-    "scattermoe @ https://github.com/shawntan/scattermoe.git",
 ]
 
 [dependency-groups]
