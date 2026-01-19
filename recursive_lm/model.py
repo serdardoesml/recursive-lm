@@ -172,7 +172,10 @@ class MoE(nn.Module):
 
         # Auxiliary loss to keep experts balanced (Only calculate if training)
         if training:
-            self.aux_loss = self.aux_loss + self._aux_loss(router_probs, topk_idx)
+            importance = router_probs.mean(dim=0) # [n_expert]
+            load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert).to(router_probs.dtype)
+            load = load / topk_idx.numel()
+            self.aux_loss = self.aux_loss + (self.n_expert * torch.sum(importance * load))
 
         n_tokens = x.shape[0]
         flat_idx = topk_idx.reshape(-1) # [N*k] expert id for each (token, k)
@@ -189,13 +192,6 @@ class MoE(nn.Module):
             out.index_add_(0, token_idx, expert_out) # [N, d] Sums outputs back into residual shape
 
         return out
-
-    @torch._dynamo.disable
-    def _aux_loss(self, router_probs, topk_idx):
-        importance = router_probs.mean(dim=0) # [n_expert]
-        load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert).to(router_probs.dtype)
-        load = load / topk_idx.numel()
-        return self.n_expert * torch.sum(importance * load)
     
 class Block(nn.Module):
     def __init__(self, config, cos_cache, sin_cache):
