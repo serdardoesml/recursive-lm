@@ -31,7 +31,7 @@ class TrainingConfig:
 
     # WARNING: Performance and memory use depends a lot on torch version, not sure how to interpret this. Further testing required.
     # Overhead becomes even larger when accounting for torch.compile() in dynamic mode breaking with grad checkpointing.
-    # Although that might be fixed with some future torch version.
+    # Update: Seems to "work" after switching to MoE for some reason, but ridiculously slow.
     grad_checkpointing: bool = False 
 
     # Default target batch size: 65536 tok
@@ -55,10 +55,8 @@ class TrainingConfig:
     max_grad_norm: float = 2.0
 
     # Massive speedup with torch 2.9.1 (33% reduction in step time), however with torch 2.4 it was constantly triggering recompilation.
-    # Does not work with grad checkpointing at least with 2.9.1, seems to be related to dynamic mode.
-    # Most likely a bug that will get fixed in a later torch version, might be worth trying later again.
     # Another weird thing is without compilation, 2.4 was faster than 2.9.1 at least on H100s, no idea why.
-    # Options: "false", "true", "max-autotune"
+    # Options: "false", "true", "max-autotune" 
     torch_compile: str = "true" 
 
     # Limits step count to 100 and disables saving.
