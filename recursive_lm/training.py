@@ -73,11 +73,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         grad_checkpointing=train_config.grad_checkpointing,
     ).to(device) # Init model and move to device
 
-    moe_modules = []
-    for m in model.modules():
-        if isinstance(m, MoE):
-            m.to(torch.bfloat16) # ScatterMoE doesn't autocast
-            moe_modules.append(m) # Keep track for aux loss
+    moe_modules = [m for m in model.modules() if isinstance(m, MoE)] # Keep track for lb loss
 
     if train_config.torch_compile != "false":
         compile_kwargs = {"dynamic": True}
