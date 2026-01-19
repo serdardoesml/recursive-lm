@@ -140,6 +140,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     step = 0
     micro_step = 0
     accum_loss = 0.0
+    accum_aux_loss = 0.0
     opt.zero_grad(set_to_none=True)
     start_time = time.time()
     last_step_time = start_time
@@ -203,12 +204,14 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                     logits = model(input_ids, cu_seqlens, position_ids, True)
                     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-                    lb_loss = sum(m.aux_loss for m in moe_modules)
+                    lb_loss = sum((m.aux_loss for m in moe_modules), torch.tensor(0.0, device=loss.device))
                     loss = loss + (train_config.lb_coef * lb_loss)
 
                 # Accumulate gradients
                 loss_float = float(loss.detach())
+                aux_loss_float = float(lb_loss.detach())
                 accum_loss += loss_float
+                accum_aux_loss += aux_loss_float
                 (loss / train_config.grad_acc).backward()
                 micro_step += 1
 
@@ -241,6 +244,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                             step,
                             total_steps,
                             accum_loss,
+                            accum_aux_loss,
                             train_config,
                             scheduler,
                             last_step_time,
@@ -255,6 +259,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                         break
                     opt.zero_grad(set_to_none=True)
                     accum_loss = 0.0
+                    accum_aux_loss = 0.0
             if step >= total_steps:
                 break
     finally:
@@ -347,6 +352,7 @@ def report_step(
     step: int,
     total_steps: int,
     accum_loss: float,
+    accum_aux_loss: float,
     train_config: TrainingConfig,
     scheduler,
     last_step_time: float,
@@ -354,6 +360,7 @@ def report_step(
     wandb_run,
 ) -> float:
     avg_loss = accum_loss / train_config.grad_acc
+    avg_aux_loss = accum_aux_loss / train_config.grad_acc
     step_time = now - last_step_time
     avg_step_time = (now - start_time) / (step - 1)
     remaining = avg_step_time * (total_steps - step)
@@ -363,6 +370,7 @@ def report_step(
     print(
         f"Epoch {epoch_idx + 1}/{train_config.epoch} "
         f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
+        f"aux_loss {avg_aux_loss:.4f} "
         f"lr_embed {lr_embed:.6g} lr_block {lr_block:.6g} "
         f"step_time {step_time:.2f}s tok/s {tok_per_s:.0f} "
         f"eta {remaining:.0f}s "
@@ -375,6 +383,7 @@ def report_step(
                 "total_steps": total_steps,
                 "tokens_processed": tokens_processed,
                 "loss": avg_loss,
+                "aux_loss": avg_aux_loss,
                 "lr_embed": lr_embed,
                 "lr_block": lr_block,
                 "step_time_s": step_time,
