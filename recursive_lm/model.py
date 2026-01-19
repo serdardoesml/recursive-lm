@@ -182,7 +182,7 @@ class MoE(nn.Module):
         flat_gate = topk_gates.reshape(-1) # [N*k] gate for each (token, k)
         flat_token = torch.arange(n_tokens, device=x.device).unsqueeze(1).expand(n_tokens, self.top_k).reshape(-1) # [N*k] token ids
 
-        out = x.new_zeros((n_tokens, x.shape[-1]))
+        out = x.new_zeros((n_tokens, x.shape[-1]), dtype=torch.bfloat16)
         for expert_id in range(self.n_expert):
             mask = flat_idx == expert_id
             token_idx = flat_token[mask]
