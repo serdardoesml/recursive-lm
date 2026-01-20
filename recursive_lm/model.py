@@ -232,7 +232,8 @@ class RecursiveGPT(nn.Module):
             # TODO: Explain the idea in more detail. 
             # (Removed reference to RingFormers as this is fundamentally different and not dependent on input)
             # We initialize at zero to let model start without any depth specific information and learn it gradually.
-            self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_hidden)
+            # Bf16, shouldnt hurt stability, prevents casting issues
+            self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_hidden, dtype=torch.bfloat16) 
             nn.init.zeros_(self.rec_layer_embedding.weight) 
 
     def forward_hidden(self, input_ids, cu_seqlens, position_ids, training=False):
