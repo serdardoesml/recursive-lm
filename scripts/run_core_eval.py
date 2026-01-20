@@ -87,6 +87,7 @@ def main() -> int:
         print("Error: checkpoint missing config/state_dict.", file=sys.stderr)
         return 1
     config = ModelConfig(**checkpoint["config"])
+    config.rope_cache_len = 16384 # Prevent rope cache overflows
     model = RecursiveGPT(config)
     model.load_state_dict(checkpoint["state_dict"])
     if "cuda" in str(device):

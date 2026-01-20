@@ -24,7 +24,7 @@ class ModelConfig:
     n_mlp_intermediate: int = 1536
     rec_depth: int = 24
     tie_embed: bool = False # Tied embeddings greatly hurt performance on recursive mode
-    rope_cache_len: int = 16384
+    rope_cache_len: int = 2048
 
     # Standard gpt experimental mode to compare with non-recursive models
     standard_gpt: bool = False

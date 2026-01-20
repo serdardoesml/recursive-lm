@@ -65,7 +65,7 @@ class TrainingConfig:
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
     if train_config.profile:
         save = False
-
+    train_config.model_config.rope_cache_len = train_config.sequence_len
     model = RecursiveGPT(
         train_config.model_config,
         grad_checkpointing=train_config.grad_checkpointing,
