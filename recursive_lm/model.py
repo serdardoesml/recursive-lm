@@ -161,11 +161,11 @@ class MoE(nn.Module):
         topk_gates = F.softmax(topk_vals, dim=-1) # Per-token mix weights over top-k
 
         # Auxiliary loss to keep experts balanced (Only calculate if training)
-        """if training:
+        if training:
             importance = router_probs.mean(dim=0) # [n_expert]
             load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert).to(router_probs.dtype)
             load = load / topk_idx.numel()
-            self.aux_loss = self.aux_loss + (self.n_expert * torch.sum(importance * load))"""
+            self.aux_loss = self.aux_loss + (self.n_expert * torch.sum(importance * load))
 
         return self.experts(x, topk_gates, topk_idx)
     
