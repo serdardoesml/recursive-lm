@@ -145,7 +145,9 @@ class MoE(nn.Module):
             num_experts=self.n_expert,
             top_k=self.top_k,
         )
-        self.aux_loss = torch.zeros((), device="cuda", dtype=torch.bfloat16) # Aux loss extracted directly by training script, not that logically clean but keeps code readable
+        # Aux loss extracted directly by training script, not that logically clean but keeps code readable.
+        # Keep as a buffer so it follows the model device.
+        self.register_buffer("aux_loss", torch.zeros((), dtype=torch.bfloat16), persistent=False)
 
         # Init router bias as 0
         nn.init.zeros_(self.router.bias)
