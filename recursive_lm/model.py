@@ -35,7 +35,6 @@ class ModelConfig:
 
 
 class RMSNorm(nn.Module): # Replaced initial unparameterized norm with this to enable more flexibility for the model.
-
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
@@ -156,17 +155,17 @@ class MoE(nn.Module):
         # x: [total_tokens, n_hidden]
         router_logits = self.router(x) # [N, n_expert]
         router_probs = F.softmax(router_logits, dim=-1) # [N, n_expert]
-        topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k) # [N, k]
+        topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k, sorted=False) # [N, k]
         topk_idx = topk_idx.to(torch.int32)
 
         topk_gates = F.softmax(topk_vals, dim=-1) # Per-token mix weights over top-k
 
         # Auxiliary loss to keep experts balanced (Only calculate if training)
-        if training:
+        """if training:
             importance = router_probs.mean(dim=0) # [n_expert]
             load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert).to(router_probs.dtype)
             load = load / topk_idx.numel()
-            self.aux_loss = self.aux_loss + (self.n_expert * torch.sum(importance * load))
+            self.aux_loss = self.aux_loss + (self.n_expert * torch.sum(importance * load))"""
 
         return self.experts(x, topk_gates, topk_idx)
     

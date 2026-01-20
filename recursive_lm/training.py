@@ -23,7 +23,7 @@ class TrainingConfig:
     lr_block: float = 0.02 # Muon requires higher learning rate.
     wd_adam: float = 0.005
     wd_muon: float = 0.1
-    lb_coef: float = 1e-2
+    lb_coef: float = 4e-3
 
     # MASSIVE reduction in memory use with grad checkpointing as it allows almost O(1) memory complexity for depth.
     # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
