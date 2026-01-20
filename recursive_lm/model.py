@@ -145,7 +145,8 @@ class MoE(nn.Module):
             num_experts=self.n_expert,
             top_k=self.top_k,
         )
-        self.aux_loss = 0.0 # Aux loss extracted directly by training script, not that logically clean but keeps code readable
+        self.aux_loss = torch.zeros((), dtype=torch.bfloat16) # Aux loss extracted directly by training script, not that logically clean but keeps code readable
+        self.register_buffer("aux_loss", self.aux_loss, persistent=False) # We register it as a buffer to ensure it gets moved to device together with the model
 
         # Init router bias as 0
         nn.init.zeros_(self.router.bias)
@@ -164,7 +165,7 @@ class MoE(nn.Module):
             importance = router_probs.mean(dim=0) # [n_expert]
             load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert).to(router_probs.dtype)
             load = load / topk_idx.numel()
-            self.aux_loss = self.aux_loss + (self.n_expert * torch.sum(importance * load))
+            self.aux_loss += (self.n_expert * torch.sum(importance * load))
 
         return self.experts(x, topk_gates, topk_idx)
     
@@ -237,6 +238,8 @@ class RecursiveGPT(nn.Module):
             nn.init.zeros_(self.rec_layer_embedding.weight) 
 
     def forward_hidden(self, input_ids, cu_seqlens, position_ids, training=False):
+        # TODO: Think about whether passing rope_cache_len as max_seqlen to flash-attn makes sense for inference
+
         # input_ids: [total_tokens] (flattened)
         x = self.e_to_h(self.embedding(input_ids))  # [total_tokens, n_hidden]
         if self.config.standard_gpt:

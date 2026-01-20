@@ -200,7 +200,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 # Cast to bf16 for fast training with A100 and H100s .
                 # Varlen-attn doesn't support anything else, so no need to change this really. 
                 for m in moe_modules:
-                    m.aux_loss = 0.0
+                    m.aux_loss.zero_()
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                     logits = model(input_ids, cu_seqlens, position_ids, True)
                     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
