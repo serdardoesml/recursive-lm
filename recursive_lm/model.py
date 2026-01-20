@@ -58,8 +58,7 @@ def apply_rotary_emb(x, cos, sin):
     x1, x2 = x[..., :d], x[..., d:] # split last dim into halves
     y1 = x1 * cos + x2 * sin # rotate pairs
     y2 = x1 * (-sin) + x2 * cos
-    out = torch.cat([y1, y2], dim=-1)
-    return out.to(dtype=x.dtype)
+    return torch.cat([y1, y2], dim=-1)
 
 class CausalVarlenSelfAttention(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
@@ -201,7 +200,8 @@ class RecursiveGPT(nn.Module):
         inv_freq = 1.0 / (10000 ** (torch.arange(0, half, device=device, dtype=torch.float32) / half))
         t = torch.arange(max_seqlen, device=device, dtype=torch.float32)
         freqs = torch.outer(t, inv_freq)  # [max_seqlen, half]
-        return freqs.cos(), freqs.sin()
+        cos, sin = freqs.cos(), freqs.sin()
+        return cos.bfloat16(), sin.bfloat16() # Keep in bf16
 
     def __init__(self, config: ModelConfig, grad_checkpointing: bool = False):
         super().__init__()

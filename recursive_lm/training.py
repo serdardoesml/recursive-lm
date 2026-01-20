@@ -59,7 +59,7 @@ class TrainingConfig:
     # Options: "false", "true", "max-autotune" 
     torch_compile: str = "true" 
 
-    # Limits step count to 100 and disables saving.
+    # Limits step count to 10 and disables saving.
     profile: bool = False
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
@@ -134,7 +134,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         / (train_config.microbatch_tok * train_config.grad_acc)
     )
     if train_config.profile:
-        total_steps = min(total_steps, 100)
+        total_steps = min(total_steps, 10)
 
     # Initializing stuff
     step = 0
@@ -197,7 +197,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 max_sl=train_config.sequence_len,
                 device=device
             ):
-                # Everything is bf16 for fast training with A100 and H100s .
+                # Cast to bf16 for fast training with A100 and H100s .
                 # Varlen-attn doesn't support anything else, so no need to change this really. 
                 for m in moe_modules:
                     m.aux_loss = 0.0
