@@ -25,7 +25,7 @@ def flatten_sort_count(expert_idxs: torch.Tensor, num_experts: int):
 
 class ParallelLinear(torch.autograd.Function):
     @staticmethod
-    @custom_fwd(device_type="cuda")
+    @custom_fwd(device_type="cuda", cast_inputs=torch.bfloat16)
     def forward(
         ctx, 
         x: torch.Tensor, expert_weights: torch.Tensor, k: int,
