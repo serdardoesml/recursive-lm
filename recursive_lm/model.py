@@ -36,18 +36,29 @@ class ModelConfig:
 
 def apply_rotary_emb(x, cos, sin):
     """
+    In-place rotary embedding.
+
     x:   [N, H, D]   (e.g., q or k from packed qkv tensor)
     cos: [N, 1, D//2]
     sin: [N, 1, D//2]
 
-    Returns: [N, H, D]
+    Returns: [N, H, D] (same tensor as `x`)
     """
     assert x.ndim == 3
     d = x.shape[-1] // 2
-    x1, x2 = x[..., :d], x[..., d:] # split last dim into halves
-    y1 = x1 * cos + x2 * sin # rotate pairs
+
+    # Split last dim into halves (views into `x`)
+    x1 = x[..., :d]
+    x2 = x[..., d:]
+
+    # Compute rotated halves BEFORE writing back into `x`
+    y1 = x1 * cos + x2 * sin
     y2 = x1 * (-sin) + x2 * cos
-    return torch.cat([y1, y2], dim=-1)
+
+    # Write back in-place (avoids torch.cat allocation/copy)
+    x[..., :d] = y1
+    x[..., d:] = y2
+    return x
 
 class CausalVarlenSelfAttention(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
