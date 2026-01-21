@@ -47,6 +47,7 @@ def apply_rotary_emb(x, cos, sin):
     y1 = x1 * cos + x2 * sin
     y2 = x1 * (-sin) + x2 * cos
 
+    # Removed torch.concat
     out = torch.empty_like(x)
     out[..., :d] = y1
     out[..., d:] = y2
