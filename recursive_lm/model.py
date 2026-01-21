@@ -34,17 +34,6 @@ class ModelConfig:
         return self.n_hidden // self.n_head
 
 
-class RMSNorm(nn.Module): # Replaced initial unparameterized norm with this to enable more flexibility for the model.
-    def __init__(self, dim: int, eps: float = 1e-6):
-        super().__init__()
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(dim))
-
-    def forward(self, x):
-        # x: [..., dim]
-        rms = torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
-        return x * rms * self.weight
-
 def apply_rotary_emb(x, cos, sin):
     """
     x:   [N, H, D]   (e.g., q or k from packed qkv tensor)
@@ -71,7 +60,7 @@ class CausalVarlenSelfAttention(nn.Module):
         self.n_hidden = config.n_hidden
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
-        self.norm_qk = RMSNorm(self.head_dim)
+        self.norm_qk = nn.RMSNorm(self.head_dim, eps=1e-6)
 
         # Gated Attention (https://arxiv.org/pdf/2505.06708)
         # SDPAHeadwiseGate: per-head sigmoid gate applied to SDPA output.
@@ -175,8 +164,8 @@ class Block(nn.Module):
         super().__init__()
         self.attn = CausalVarlenSelfAttention(config, cos_cache, sin_cache)
         self.moe = MoE(config)
-        self.norm_attn = RMSNorm(config.n_hidden)
-        self.norm_mlp = RMSNorm(config.n_hidden)
+        self.norm_attn = nn.RMSNorm(config.n_hidden, eps=1e-6)
+        self.norm_mlp = nn.RMSNorm(config.n_hidden, eps=1e-6)
 
     def forward(self, x, cu_seqlens, max_seqlen, position_ids, training):
         # We do pre-norm and QK norm. 
@@ -223,7 +212,7 @@ class RecursiveGPT(nn.Module):
 
         self.e_to_h = nn.Linear(config.n_wembed, config.n_hidden, bias=False)
         self.h_to_e = nn.Linear(config.n_hidden, config.n_wembed, bias=False)
-        self.norm_out = RMSNorm(config.n_wembed)
+        self.norm_out = nn.RMSNorm(config.n_wembed, eps=1e-6)
         
         if config.standard_gpt:
             self.blocks = nn.ModuleList([Block(config, cos_cache, sin_cache) for _ in range(config.rec_depth)])
