@@ -110,7 +110,7 @@ def batch_iterator(
     max_sl: int = 512,
     token_col: str = "tokens",
     drop_last: bool = True,
-    device="cpu",
+    device="cuda",
 ):
     """Yield packed (micro)batches with fixed token budget.
 
