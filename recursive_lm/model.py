@@ -134,9 +134,9 @@ class MoE(nn.Module):
             num_experts=self.n_expert,
             top_k=self.top_k,
         )
-        # Aux loss extracted directly by training script, not that logically clean but keeps code readable.
-        # Keep as a buffer so it follows the model device.
-        self.register_buffer("aux_loss", torch.zeros((), dtype=torch.bfloat16), persistent=False)
+        self.register_buffer("balance_entropy", torch.zeros((), dtype=torch.float32), persistent=False)
+        self.register_buffer("balance_eff", torch.zeros((), dtype=torch.float32), persistent=False)
+        self.register_buffer("balance_count", torch.zeros((), dtype=torch.float32), persistent=False)
 
         # Init router bias as 0
         nn.init.zeros_(self.router.bias)
@@ -144,19 +144,19 @@ class MoE(nn.Module):
     def forward(self, x, training):
         # x: [total_tokens, n_hidden]
         router_logits = self.router(x) # [N, n_expert]
-        softmax = torch._dynamo.disable(F.softmax)
-        router_probs = softmax(router_logits, dim=-1) # [N, n_expert]
         topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k, sorted=False) # [N, k]
         topk_idx = topk_idx.to(torch.int32)
 
-        topk_gates = softmax(topk_vals, dim=-1) # Per-token mix weights over top-k
+        topk_gates = F.softmax(topk_vals, dim=-1) # Per-token mix weights over top-k
 
-        # Auxiliary loss to keep experts balanced (Only calculate if training)
         if training:
-            importance = router_probs.mean(dim=0) # [n_expert]
-            load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert).to(router_probs.dtype)
-            load = load / topk_idx.numel()
-            self.aux_loss += (self.n_expert * torch.sum(importance * load))
+            load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert)
+            load = load.to(dtype=torch.float32)
+            load = load / load.sum()
+            entropy = -(load * (load + 1e-9).log()).sum()
+            self.balance_entropy += entropy
+            self.balance_eff += entropy.exp()
+            self.balance_count += 1.0
 
         return self.experts(x, topk_gates, topk_idx)
     
