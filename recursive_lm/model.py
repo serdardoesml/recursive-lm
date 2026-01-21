@@ -144,11 +144,12 @@ class MoE(nn.Module):
     def forward(self, x, training):
         # x: [total_tokens, n_hidden]
         router_logits = self.router(x) # [N, n_expert]
-        router_probs = F.softmax(router_logits, dim=-1) # [N, n_expert]
+        softmax = torch._dynamo.disable(F.softmax)
+        router_probs = softmax(router_logits, dim=-1) # [N, n_expert]
         topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k, sorted=False) # [N, k]
         topk_idx = topk_idx.to(torch.int32)
 
-        topk_gates = F.softmax(topk_vals, dim=-1) # Per-token mix weights over top-k
+        topk_gates = softmax(topk_vals, dim=-1) # Per-token mix weights over top-k
 
         # Auxiliary loss to keep experts balanced (Only calculate if training)
         if training:
