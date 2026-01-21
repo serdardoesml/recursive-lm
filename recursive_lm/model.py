@@ -147,7 +147,9 @@ class MoE(nn.Module):
         topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k, sorted=False) # [N, k]
         topk_idx = topk_idx.to(torch.int32)
 
-        topk_gates = F.softmax(topk_vals, dim=-1) # Per-token mix weights over top-k
+        # Sigmoid then normalize, faster than softmax
+        topk_gates = torch.sigmoid(topk_vals)
+        topk_gates = topk_gates / (topk_gates.sum(dim=-1, keepdim=True) + 1e-10)
 
         if training:
             load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert)
