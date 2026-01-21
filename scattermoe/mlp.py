@@ -19,7 +19,7 @@ class MLP(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.experts = ParallelExperts(num_experts, input_size, hidden_size, bias=bias)
-        self.output_experts = ParallelExperts(num_experts, hidden_size, input_size, bias=bias)
+        self.output_experts = ParallelExperts(num_experts, hidden_size, input_size, bias=bias, zero_init=True)
         self.top_k = min(top_k, self.num_experts)
         self.activation = activation
 
@@ -64,7 +64,7 @@ class GLUMLP(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.experts = ParallelExperts(num_experts, input_size, 2 * hidden_size, bias=bias)
-        self.output_experts = ParallelExperts(num_experts, hidden_size, input_size, bias=bias)
+        self.output_experts = ParallelExperts(num_experts, hidden_size, input_size, bias=bias, zero_init=True)
         self.top_k = min(top_k, self.num_experts)
         self.activation = activation
 
@@ -93,4 +93,3 @@ class GLUMLP(nn.Module):
         )
         y = y.view(*x_shape[:-1], y.size(-1))
         return y
-

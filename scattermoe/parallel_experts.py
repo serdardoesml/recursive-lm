@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.amp import custom_fwd, custom_bwd # Modified to fix dtype issues
+from torch.amp import custom_fwd, custom_bwd # Modified to fix dtype issues, added zero init
 from . import kernels
 from typing import Optional
 
@@ -149,7 +149,7 @@ def parallel_linear(inputs, expert_weights, k,
     return results
 
 class ParallelExperts(nn.Module):
-    def __init__(self, num_experts, input_size, output_size, bias=False) -> None:
+    def __init__(self, num_experts, input_size, output_size, bias=False, zero_init=False) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.empty(num_experts, output_size, input_size))
 
@@ -161,6 +161,7 @@ class ParallelExperts(nn.Module):
         self.num_experts = num_experts
         self.input_size = input_size
         self.output_size = output_size
+        self.zero_init = zero_init
         self.reset_parameters()
 
     def extra_repr(self):
@@ -168,7 +169,10 @@ class ParallelExperts(nn.Module):
             self.num_experts, self.input_size, self.output_size)
 
     def reset_parameters(self) -> None:
-        nn.init.normal_(self.weight, std=0.02)
+        if self.zero_init:
+            nn.init.zeros_(self.weight)
+        else:
+            nn.init.normal_(self.weight, std=0.02)
         if self.bias is not None:
             nn.init.zeros_(self.bias)
 

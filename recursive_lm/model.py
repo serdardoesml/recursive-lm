@@ -133,7 +133,7 @@ class MoE(nn.Module):
             hidden_size=config.n_mlp_intermediate,
             num_experts=self.n_expert,
             top_k=self.top_k,
-        )
+        ) # Modified to zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
         self.register_buffer("balance_entropy", torch.zeros((), dtype=torch.float32), persistent=False)
         self.register_buffer("balance_eff", torch.zeros((), dtype=torch.float32), persistent=False)
         self.register_buffer("balance_count", torch.zeros((), dtype=torch.float32), persistent=False)
