@@ -60,7 +60,7 @@ class CausalVarlenSelfAttention(nn.Module):
         self.n_hidden = config.n_hidden
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
-        self.norm_qk = nn.RMSNorm(self.head_dim, eps=1e-6)
+        self.norm_qk = nn.RMSNorm(self.head_dim, eps=1e-6, dtype=torch.bfloat16)
 
         # Gated Attention (https://arxiv.org/pdf/2505.06708)
         # SDPAHeadwiseGate: per-head sigmoid gate applied to SDPA output.
@@ -164,8 +164,8 @@ class Block(nn.Module):
         super().__init__()
         self.attn = CausalVarlenSelfAttention(config, cos_cache, sin_cache)
         self.moe = MoE(config)
-        self.norm_attn = nn.RMSNorm(config.n_hidden, eps=1e-6)
-        self.norm_mlp = nn.RMSNorm(config.n_hidden, eps=1e-6)
+        self.norm_attn = nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16)
+        self.norm_mlp = nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16)
 
     def forward(self, x, cu_seqlens, max_seqlen, position_ids, training):
         # We do pre-norm and QK norm. 
@@ -212,7 +212,7 @@ class RecursiveGPT(nn.Module):
 
         self.e_to_h = nn.Linear(config.n_wembed, config.n_hidden, bias=False)
         self.h_to_e = nn.Linear(config.n_hidden, config.n_wembed, bias=False)
-        self.norm_out = nn.RMSNorm(config.n_wembed, eps=1e-6)
+        self.norm_out = nn.RMSNorm(config.n_wembed, eps=1e-6, dtype=torch.bfloat16)
         
         if config.standard_gpt:
             self.blocks = nn.ModuleList([Block(config, cos_cache, sin_cache) for _ in range(config.rec_depth)])
