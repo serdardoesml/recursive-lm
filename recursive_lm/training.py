@@ -201,12 +201,12 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             ):
                 # Cast to bf16 for fast training with A100 and H100s .
                 # Varlen-attn doesn't support anything else, so no need to change this really. 
+                if train_config.torch_compile != "false":
+                    torch.compiler.cudagraph_mark_step_begin()
                 for m in moe_modules:
                     m.balance_entropy.zero_()
                     m.balance_eff.zero_()
                     m.balance_count.zero_()
-                if train_config.torch_compile != "false":
-                    torch.compiler.cudagraph_mark_step_begin()
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                     logits = model(input_ids, cu_seqlens, position_ids, True)
                     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
