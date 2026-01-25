@@ -77,7 +77,6 @@ class GLUMLP(nn.Module):
         sorted_expert_idxs, sorted_scattered_idxs, expert_offsets = \
             flatten_sort_count(expert_idxs, num_experts=self.num_experts)
 
-
         h, gates  = self.experts(
             x, self.top_k,
             sorted_expert_idxs, sorted_scattered_idxs,

@@ -13,6 +13,7 @@ from .common import get_base_dir
 
 from dataclasses import dataclass, asdict
 from datetime import datetime
+import math
 import os
 import time
 
@@ -378,6 +379,10 @@ def report_step(
     avg_loss = accum_loss / train_config.grad_acc
     avg_entropy = accum_entropy / train_config.grad_acc
     avg_eff = accum_eff / train_config.grad_acc
+    n_expert = train_config.model_config.n_expert
+    max_entropy = math.log(n_expert) if n_expert > 0 else 0.0
+    avg_entropy_pct = (avg_entropy / max_entropy * 100.0) if max_entropy > 0 else 0.0
+    avg_eff_pct = (avg_eff / n_expert * 100.0) if n_expert > 0 else 0.0
     step_time = now - last_step_time
     avg_step_time = (now - start_time) / (step - 1)
     remaining = avg_step_time * (total_steps - step)
@@ -387,7 +392,7 @@ def report_step(
     print(
         f"Epoch {epoch_idx + 1}/{train_config.epoch} "
         f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
-        f"moe_entropy {avg_entropy:.4f} eff_experts {avg_eff:.2f} "
+        f"moe_entropy {avg_entropy_pct:.2f}% eff_experts {avg_eff_pct:.2f}% "
         f"lr_embed {lr_embed:.6g} lr_block {lr_block:.6g} "
         f"step_time {step_time:.2f}s tok/s {tok_per_s:.0f} "
         f"eta {remaining:.0f}s "
@@ -400,8 +405,8 @@ def report_step(
                 "total_steps": total_steps,
                 "tokens_processed": tokens_processed,
                 "loss": avg_loss,
-                "moe_entropy": avg_entropy,
-                "moe_eff_experts": avg_eff,
+                "moe_entropy": avg_entropy_pct,
+                "moe_eff_experts": avg_eff_pct,
                 "lr_embed": lr_embed,
                 "lr_block": lr_block,
                 "step_time_s": step_time,

@@ -22,7 +22,6 @@ def flatten_sort_count(expert_idxs: torch.Tensor, num_experts: int):
         return sorted_expert_idxs, sorted_scattered_idxs, expert_offsets
 
 
-
 class ParallelLinear(torch.autograd.Function):
     @staticmethod
     @custom_fwd(device_type="cuda", cast_inputs=torch.bfloat16)

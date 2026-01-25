@@ -132,12 +132,17 @@ class MoE(nn.Module):
         self.top_k = config.top_k
         self.n_expert = config.n_expert
         self.router = nn.Linear(config.n_hidden, self.n_expert, bias=True)
+
+        # Modified to zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
+        # SwiGLU by default
         self.experts = GLUMLP( 
             input_size=config.n_hidden,
             hidden_size=config.n_mlp_intermediate,
             num_experts=self.n_expert,
             top_k=self.top_k,
-        ) # Modified to zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
+        )
+
+        # Routing balance metrics
         self.register_buffer("balance_entropy", torch.zeros((), dtype=torch.float32), persistent=False)
         self.register_buffer("balance_eff", torch.zeros((), dtype=torch.float32), persistent=False)
         self.register_buffer("balance_count", torch.zeros((), dtype=torch.float32), persistent=False)
@@ -156,6 +161,7 @@ class MoE(nn.Module):
         topk_gates = topk_gates / (topk_gates.sum(dim=-1, keepdim=True) + 1e-10)
 
         if training:
+            # Measure balance with load entropy
             load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert)
             load = load.to(dtype=torch.float32)
             load = load / load.sum()

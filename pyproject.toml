@@ -11,7 +11,7 @@ dependencies = [
     "pyarrow>=22.0.0",
     "pyyaml>=6.0.0",
     "tiktoken>=0.12.0",
-    "torch==2.10.0.dev20251213+cu126",
+    "torch>=2.10",
     "wandb>=0.23.1",
 ]
 
@@ -32,10 +32,3 @@ module-name = "rustbpe"
 bindings = "pyo3"
 python-source = "."
 manifest-path = "rustbpe/Cargo.toml"
-
-[tool.uv.sources]
-torch = { index = "pytorch-nightly" }
-
-[[tool.uv.index]]
-name = "pytorch-nightly"
-url = "https://download.pytorch.org/whl/nightly/"
