@@ -4,12 +4,7 @@ Data loader that streams tokenized data from parquet files and packs into (micro
 The goal is to fill each microbatch with a fixed number of tokens across any number of segments,
 with each segment having a maximum length to ensure a minimum diversity within each batch, and to prevent attention memory exploding.
 
-With a max segment length of 512 and a target token per batch of 65536 and grad_acc of 8 (Meaning our batch is split into 8 microbatches)
-Each microbatch has a minimum of 7681/8192 tokens in the worst case. Meaning we get a minimum fill-rate of 93% for this configuration.
-This could be improved if we split up a segment further to fill the microbatch,
-but this is probably unnecessary and could trade performance for speed slightly.
-
-TODO: Add batch utilization rate metric tracking.
+Sequences can be split further to fill up the microbatch with an exact number of tokens in order to retain fixed shapes.
 """
 
 import os
@@ -131,11 +126,24 @@ def batch_iterator(
         if seglen <= 0:
             continue
 
-        # If adding this would exceed budget, flush current batch first.
+        # If adding this would exceed budget, try to split with 1-token overlap.
         if buf and tok + seglen > tokens_per_batch:
-            yield pack_batch(buf, device=device)
-            buf.clear()
-            tok = 0
+            remaining = tokens_per_batch - tok
+            if remaining > 0:
+                # Split within the same segment so we don't drop a target at the boundary.
+                head = chunk[: remaining + 1]
+                tail = chunk[remaining:]
+                buf.append(head)
+                tok += remaining
+                yield pack_batch(buf, device=device)
+                buf.clear()
+                tok = 0
+                chunk = tail
+                seglen = len(chunk) - 1
+            else:
+                yield pack_batch(buf, device=device)
+                buf.clear()
+                tok = 0
 
         buf.append(chunk)
         tok += seglen

@@ -9,7 +9,7 @@ import tiktoken
 from functools import lru_cache
 
 SPECIAL_TOKENS = [
-    # every document begins with the Beginning of Sequence (BOS) token that delimits documents
+    # Note: We don't pre-train with any bos tokens.
     "<|bos|>",
     # tokens below are only used during finetuning to render Conversations into token ids
     "<|user_start|>", # user messages

@@ -75,7 +75,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     moe_modules = [m for m in model.modules() if isinstance(m, MoE)] # Keep track for balance stats
 
     if train_config.torch_compile != "false":
-        compile_kwargs = {"dynamic": True}
+        compile_kwargs = {} # After fixing token shape, setting dynamic to either true or false makes performance worse, as it's mostly static except for cu_seqlens
         if train_config.torch_compile == "max-autotune":
             compile_kwargs["mode"] = "max-autotune-no-cudagraphs"
         model = torch.compile(model, **compile_kwargs)
