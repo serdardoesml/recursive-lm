@@ -77,7 +77,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     if train_config.torch_compile != "false":
         compile_kwargs = {"dynamic": True}
         if train_config.torch_compile == "max-autotune":
-            compile_kwargs["mode"] = "max-autotune-no-cudagraphs"  # Cudagraphs do not work
+            compile_kwargs["mode"] = "max-autotune"
         model = torch.compile(model, **compile_kwargs)
 
     # Set up param groups.
@@ -205,6 +205,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                     m.balance_entropy.zero_()
                     m.balance_eff.zero_()
                     m.balance_count.zero_()
+                if train_config.torch_compile != "false":
+                    torch.compiler.cudagraph_mark_step_begin()
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                     logits = model(input_ids, cu_seqlens, position_ids, True)
                     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
