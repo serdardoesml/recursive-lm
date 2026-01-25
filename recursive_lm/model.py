@@ -160,7 +160,7 @@ class MoE(nn.Module):
         topk_gates = torch.sigmoid(topk_vals)
         topk_gates = topk_gates / (topk_gates.sum(dim=-1, keepdim=True) + 1e-10)
 
-        if training:
+        if training and not torch.compiler.is_compiling():
             # Measure balance with load entropy
             load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert)
             load = load.to(dtype=torch.float32)
