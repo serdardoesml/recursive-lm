@@ -17,9 +17,6 @@ import math
 import os
 import time
 
-# Can't use cuda graphs due to dynamic inputs, although maybe still provides a benefit with this.
-torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True
-
 @dataclass
 class TrainingConfig:
     model_config: ModelConfig
@@ -80,7 +77,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     if train_config.torch_compile != "false":
         compile_kwargs = {"dynamic": True}
         if train_config.torch_compile == "max-autotune":
-            compile_kwargs["mode"] = "max-autotune"
+            compile_kwargs["mode"] = "max-autotune-no-cudagraphs"
         model = torch.compile(model, **compile_kwargs)
 
     # Set up param groups.
