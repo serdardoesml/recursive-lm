@@ -12,7 +12,7 @@ def compileable_bincount(x: torch.Tensor, minlength: int) -> torch.Tensor:
 def _(x: torch.Tensor, minlength: int) -> torch.Tensor:
     return torch.empty(minlength, dtype=torch.long, device=x.device)
 
-# Removed torch.compile as already compiled
+@torch.compile
 def flatten_sort_count(expert_idxs: torch.Tensor, num_experts: int):
     with torch.no_grad():
         flattened_expert_idxs = expert_idxs.flatten()
