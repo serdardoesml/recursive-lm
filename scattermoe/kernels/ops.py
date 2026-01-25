@@ -47,7 +47,7 @@ def _scatter2scatter_configs():
         triton.Config({'BLOCK_N': 128, 'BLOCK_K': 32}, num_stages=4, num_warps=4),
     ]
 
-@triton.autotune(configs=_scatter2scatter_configs(), key=['M', 'N', 'K'], )
+@triton.autotune(configs=_scatter2scatter_configs(), key=['N', 'K'], ) # Removed M as key due to dynamic input lengths
 @triton.heuristics({
     "NO_K_MASK": lambda args: (args['K'] % args['BLOCK_K']) == 0,
     "NO_N_MASK": lambda args: (args['N'] % args['BLOCK_N']) == 0,
@@ -370,8 +370,8 @@ def _xty_and_bias(
 def _config_grouping():
     return [
         triton.Config({'BLOCK_N': 256, 'BLOCK_K': 128}, num_stages=4, num_warps=4),
-        # triton.Config({'BLOCK_N': 128, 'BLOCK_K': 64}, num_stages=4, num_warps=4),
-        # triton.Config({'BLOCK_N': 64, 'BLOCK_K': 32}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_N': 128, 'BLOCK_K': 64}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_N': 64, 'BLOCK_K': 32}, num_stages=4, num_warps=4),
     ]
 
 def group(A, sorted_expert_idxs, coeff=None, fan_out=1, out=None):
