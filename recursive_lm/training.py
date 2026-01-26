@@ -91,11 +91,11 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         embed_params += list(model.lm_head.parameters())
     if hasattr(model, "rec_layer_embedding"):
         embed_params += list(model.rec_layer_embedding.parameters())
+    embed_params += list(model.attn_norms.parameters())
+    embed_params += list(model.mlp_norms.parameters())
+    embed_params += list(model.qk_norms.parameters())
     if train_config.model_config.standard_gpt:
         for block in model.blocks:
-            embed_params += list(block.norm_attn.parameters())
-            embed_params += list(block.norm_mlp.parameters())
-            embed_params += list(block.attn.norm_qk.parameters())
             embed_params.append(block.attn.gate.bias)
             embed_params.append(block.moe.router.bias)
         block_params = []
@@ -105,9 +105,6 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             block_params += [p for p in block.moe.parameters() if p is not block.moe.router.bias]
             block_params.append(block.attn.gate.weight)
     else:
-        embed_params += list(model.recursive_block.norm_attn.parameters())
-        embed_params += list(model.recursive_block.norm_mlp.parameters())
-        embed_params += list(model.recursive_block.attn.norm_qk.parameters())
         embed_params.append(model.recursive_block.attn.gate.bias)
         embed_params.append(model.recursive_block.moe.router.bias)
         block_params = list(model.recursive_block.attn.Wqkv.parameters())

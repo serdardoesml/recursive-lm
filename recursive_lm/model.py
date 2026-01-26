@@ -64,7 +64,6 @@ class CausalVarlenSelfAttention(nn.Module):
         self.n_hidden = config.n_hidden
         self.n_head = config.n_head
         self.head_dim = config.n_headdim
-        self.norm_qk = nn.RMSNorm(self.head_dim, eps=1e-6, dtype=torch.bfloat16)
 
         # Gated Attention (https://arxiv.org/pdf/2505.06708)
         # SDPAHeadwiseGate: per-head sigmoid gate applied to SDPA output.
@@ -84,7 +83,7 @@ class CausalVarlenSelfAttention(nn.Module):
         self.register_buffer("cos_cache", cos_cache, persistent=False)
         self.register_buffer("sin_cache", sin_cache, persistent=False)
     
-    def forward(self, x, cu_seqlens, max_seqlen, position_ids):
+    def forward(self, x, cu_seqlens, max_seqlen, position_ids, norm_qk):
         """
         x: [total_tokens, n_hidden] (flattened packed tokens)
         cu_seqlens: [n_seqs+1] int32
@@ -103,8 +102,8 @@ class CausalVarlenSelfAttention(nn.Module):
 
         # qkv[:, 0] is Q: [N, H, D], qkv[:, 1] is K: [N, H, D]
         # We also apply QK norm
-        qkv[:, 0] = self.norm_qk(apply_rotary_emb(qkv[:, 0], cos, sin))
-        qkv[:, 1] = self.norm_qk(apply_rotary_emb(qkv[:, 1], cos, sin))
+        qkv[:, 0] = norm_qk(apply_rotary_emb(qkv[:, 0], cos, sin))
+        qkv[:, 1] = norm_qk(apply_rotary_emb(qkv[:, 1], cos, sin))
 
         # We split qkv as torch varlen-attn does not support packed qkv.
         attn_out = attention.varlen_attn(
@@ -166,15 +165,13 @@ class Block(nn.Module):
         super().__init__()
         self.attn = CausalVarlenSelfAttention(config, cos_cache, sin_cache)
         self.moe = MoE(config)
-        self.norm_attn = nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16)
-        self.norm_mlp = nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16)
 
-    def forward(self, x, cu_seqlens, max_seqlen, position_ids, training):
+    def forward(self, x, cu_seqlens, max_seqlen, position_ids, training, norm_attn, norm_mlp, norm_qk):
         # We do pre-norm and QK norm. 
         # We used to do a Gemma 3 style post-norm, but removed it to improve stability 
         # and keep the residual stream norm in check. Seems to work fine.
-        x = x + self.attn(self.norm_attn(x), cu_seqlens, max_seqlen, position_ids)
-        x = x + self.moe(self.norm_mlp(x), training)
+        x = x + self.attn(norm_attn(x), cu_seqlens, max_seqlen, position_ids, norm_qk)
+        x = x + self.moe(norm_mlp(x), training)
         return x
 
 
@@ -215,6 +212,17 @@ class RecursiveGPT(nn.Module):
         self.e_to_h = nn.Linear(config.n_wembed, config.n_hidden, bias=False)
         self.h_to_e = nn.Linear(config.n_hidden, config.n_wembed, bias=False)
         self.norm_out = nn.RMSNorm(config.n_wembed, eps=1e-6, dtype=torch.bfloat16)
+
+        # Independent norms for each depth
+        self.attn_norms = nn.ModuleList(
+            [nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(config.rec_depth)]
+        )
+        self.mlp_norms = nn.ModuleList(
+            [nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(config.rec_depth)]
+        )
+        self.qk_norms = nn.ModuleList(
+            [nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(config.rec_depth)]
+        )
         
         if config.standard_gpt:
             self.blocks = nn.ModuleList([Block(config, cos_cache, sin_cache) for _ in range(config.rec_depth)])
@@ -236,18 +244,27 @@ class RecursiveGPT(nn.Module):
         x = self.e_to_h(self.embedding(input_ids))  # [total_tokens, n_hidden]
         if self.config.standard_gpt:
             for i in range(self.config.rec_depth):
-                x = self.blocks[i](x, cu_seqlens, self.config.rope_cache_len, position_ids, training)
+                x = self.blocks[i](
+                    x,
+                    cu_seqlens,
+                    self.config.rope_cache_len,
+                    position_ids,
+                    training,
+                    self.attn_norms[i],
+                    self.mlp_norms[i],
+                    self.qk_norms[i],
+                )
         else:
             for i in range(self.config.rec_depth):
                 if self.grad_checkpointing:
                     def recursive_step(x, cu_seqlens, position_ids, training, i=i):
                         x = x + self.rec_layer_embedding.weight[i]
-                        return self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, training)
+                        return self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, training, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
 
                     x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, training, use_reentrant=False)
                 else:
                     x = x + self.rec_layer_embedding.weight[i]
-                    x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, training)
+                    x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, training, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         return x
 
     def forward(self, input_ids, cu_seqlens, position_ids, training=False):
