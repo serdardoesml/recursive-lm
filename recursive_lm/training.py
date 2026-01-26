@@ -217,7 +217,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 loss_float = float(loss.detach())
                 lb_loss_float = float(lb_loss.detach())
                 accum_loss += loss_float
-                accum_lb_loss += lb_loss_float
+                accum_lb_loss += lb_loss_float / max(1, len(moe_modules)) # Avoid divide by 0, just incase.
                 (loss / train_config.grad_acc).backward()
                 micro_step += 1
 
