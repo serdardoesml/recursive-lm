@@ -126,11 +126,11 @@ def batch_iterator(
         if seglen <= 0:
             continue
 
-        # If adding this would exceed budget, try to split with 1-token overlap.
+        # If adding this would exceed budget, split the chunk to exactly fill.
         if buf and tok + seglen > tokens_per_batch:
             remaining = tokens_per_batch - tok
             if remaining > 0:
-                # Split within the same segment so we don't drop a target at the boundary.
+                # Split within the same chunk; overlap by one token to preserve last target.
                 head = chunk[: remaining + 1]
                 tail = chunk[remaining:]
                 buf.append(head)

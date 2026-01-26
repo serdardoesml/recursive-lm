@@ -24,7 +24,7 @@ class TrainingConfig:
     lr_block: float = 0.02 # Muon requires higher learning rate.
     wd_adam: float = 0.005
     wd_muon: float = 0.1
-    lb_coef: float = 4e-3
+    lb_coef: float = 1e-5 # Taken from SimBal paper (https://arxiv.org/pdf/2506.14038v2)
 
     # MASSIVE reduction in memory use with grad checkpointing as it allows almost O(1) memory complexity for depth.
     # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
@@ -141,8 +141,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     step = 0
     micro_step = 0
     accum_loss = 0.0
-    accum_entropy = 0.0
-    accum_eff = 0.0
+    accum_lb_loss = 0.0
     opt.zero_grad(set_to_none=True)
     start_time = time.time()
     last_step_time = start_time
@@ -201,31 +200,24 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             ):
                 # Cast to bf16 for fast training with A100 and H100s .
                 # Varlen-attn doesn't support anything else, so no need to change this really. 
-                for m in moe_modules:
-                    m.balance_entropy.zero_()
-                    m.balance_eff.zero_()
-                    m.balance_count.zero_()
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                     logits = model(input_ids, cu_seqlens, position_ids, True)
                     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-                entropy_vals = []
-                eff_vals = []
-                for m in moe_modules:
-                    if m.balance_count.item() > 0:
-                        entropy_vals.append(m.balance_entropy / m.balance_count)
-                        eff_vals.append(m.balance_eff / m.balance_count)
-                if entropy_vals:
-                    batch_entropy = torch.stack(entropy_vals).mean()
-                    batch_eff = torch.stack(eff_vals).mean()
-                else:
-                    batch_entropy = torch.tensor(0.0, device=loss.device)
-                    batch_eff = torch.tensor(0.0, device=loss.device)
+
+                    # SimBal load balancing loss (https://arxiv.org/pdf/2506.14038v2)
+                    lb_loss = logits.new_tensor(0.0)
+                    for m in moe_modules:
+                        W = m.router.weight.float()  # [E, D]
+                        G = W @ W.t()  # [E, E]
+                        I = torch.eye(G.shape[0], device=G.device, dtype=G.dtype)
+                        lb_loss = lb_loss + (G - I).pow(2).mean()
+                    loss = loss + train_config.lb_coef * lb_loss
 
                 # Accumulate gradients
                 loss_float = float(loss.detach())
+                lb_loss_float = float(lb_loss.detach())
                 accum_loss += loss_float
-                accum_entropy += float(batch_entropy.detach())
-                accum_eff += float(batch_eff.detach())
+                accum_lb_loss += lb_loss_float
                 (loss / train_config.grad_acc).backward()
                 micro_step += 1
 
@@ -258,8 +250,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                             step,
                             total_steps,
                             accum_loss,
-                            accum_entropy,
-                            accum_eff,
+                            accum_lb_loss,
                             train_config,
                             scheduler,
                             last_step_time,
@@ -274,8 +265,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                         break
                     opt.zero_grad(set_to_none=True)
                     accum_loss = 0.0
-                    accum_entropy = 0.0
-                    accum_eff = 0.0
+                    accum_lb_loss = 0.0
             if step >= total_steps:
                 break
     finally:
@@ -368,8 +358,7 @@ def report_step(
     step: int,
     total_steps: int,
     accum_loss: float,
-    accum_entropy: float,
-    accum_eff: float,
+    accum_lb_loss: float,
     train_config: TrainingConfig,
     scheduler,
     last_step_time: float,
@@ -377,12 +366,7 @@ def report_step(
     wandb_run,
 ) -> float:
     avg_loss = accum_loss / train_config.grad_acc
-    avg_entropy = accum_entropy / train_config.grad_acc
-    avg_eff = accum_eff / train_config.grad_acc
-    n_expert = train_config.model_config.n_expert
-    max_entropy = math.log(n_expert) if n_expert > 0 else 0.0
-    avg_entropy_pct = (avg_entropy / max_entropy * 100.0) if max_entropy > 0 else 0.0
-    avg_eff_pct = (avg_eff / n_expert * 100.0) if n_expert > 0 else 0.0
+    avg_lb_loss = accum_lb_loss / train_config.grad_acc
     step_time = now - last_step_time
     avg_step_time = (now - start_time) / (step - 1)
     remaining = avg_step_time * (total_steps - step)
@@ -392,7 +376,7 @@ def report_step(
     print(
         f"Epoch {epoch_idx + 1}/{train_config.epoch} "
         f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "
-        f"moe_entropy {avg_entropy_pct:.2f}% eff_experts {avg_eff_pct:.2f}% "
+        f"lb_loss: {avg_lb_loss:.4f} "
         f"lr_embed {lr_embed:.6g} lr_block {lr_block:.6g} "
         f"step_time {step_time:.2f}s tok/s {tok_per_s:.0f} "
         f"eta {remaining:.0f}s "
@@ -405,8 +389,7 @@ def report_step(
                 "total_steps": total_steps,
                 "tokens_processed": tokens_processed,
                 "loss": avg_loss,
-                "moe_entropy": avg_entropy_pct,
-                "moe_eff_experts": avg_eff_pct,
+                "lb_loss": avg_lb_loss,
                 "lr_embed": lr_embed,
                 "lr_block": lr_block,
                 "step_time_s": step_time,

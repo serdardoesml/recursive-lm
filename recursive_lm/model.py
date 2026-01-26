@@ -131,6 +131,10 @@ class MoE(nn.Module):
         super().__init__()
         self.top_k = config.top_k
         self.n_expert = config.n_expert
+
+        # Since we use SimBal (https://arxiv.org/pdf/2506.14038v2) for loss balancing,
+        # it could be useful to initialize this as orthogonal. However the paper shows
+        # that just training for a few steps gets it close to orthogonal, so it's unnecessary.
         self.router = nn.Linear(config.n_hidden, self.n_expert, bias=True)
 
         # Modified to zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
@@ -141,11 +145,6 @@ class MoE(nn.Module):
             num_experts=self.n_expert,
             top_k=self.top_k,
         )
-
-        # Routing balance metrics
-        self.register_buffer("balance_entropy", torch.zeros((), dtype=torch.float32), persistent=False)
-        self.register_buffer("balance_eff", torch.zeros((), dtype=torch.float32), persistent=False)
-        self.register_buffer("balance_count", torch.zeros((), dtype=torch.float32), persistent=False)
 
         # Init router bias as 0
         nn.init.zeros_(self.router.bias)
@@ -159,16 +158,6 @@ class MoE(nn.Module):
         # Sigmoid then normalize, faster than softmax
         topk_gates = torch.sigmoid(topk_vals)
         topk_gates = topk_gates / (topk_gates.sum(dim=-1, keepdim=True) + 1e-10)
-
-        if training and not torch.compiler.is_compiling():
-            # Measure balance with load entropy
-            load = torch.bincount(topk_idx.reshape(-1), minlength=self.n_expert)
-            load = load.to(dtype=torch.float32)
-            load = load / load.sum()
-            entropy = -(load * (load + 1e-9).log()).sum()
-            self.balance_entropy += entropy
-            self.balance_eff += entropy.exp()
-            self.balance_count += 1.0
 
         return self.experts(x, topk_gates, topk_idx)
     
