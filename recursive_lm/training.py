@@ -24,7 +24,7 @@ class TrainingConfig:
     lr_block: float = 0.02 # Muon requires higher learning rate.
     wd_adam: float = 0.005
     wd_muon: float = 0.1
-    lb_coef: float = 3e-4
+    lb_coef: float = 0.1
 
     # MASSIVE reduction in memory use with grad checkpointing as it allows almost O(1) memory complexity for depth.
     # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
@@ -207,7 +207,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                         W = m.router.weight.float()  # [E, D]
                         G = W @ W.t()  # [E, E]
                         I = torch.eye(G.shape[0], device=G.device, dtype=G.dtype)
-                        lb_loss = lb_loss + (G - I).pow(2).mean()
+                        lb_loss = lb_loss + torch.norm(G - I, p=1)
                     loss = loss + train_config.lb_coef * lb_loss
 
                 # Accumulate gradients
