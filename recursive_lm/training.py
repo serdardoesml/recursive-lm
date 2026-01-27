@@ -208,14 +208,14 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                         G = W @ W.t()  # [E, E]
                         I = torch.eye(G.shape[0], device=G.device, dtype=G.dtype)
                         lb_loss = lb_loss + torch.norm(G - I, p=1)
-                    loss = loss + train_config.lb_coef * lb_loss
+                    total_loss = loss + train_config.lb_coef * lb_loss
 
                 # Accumulate gradients
                 loss_float = float(loss.detach())
                 lb_loss_float = float(lb_loss.detach())
                 accum_loss += loss_float
                 accum_lb_loss += lb_loss_float / max(1, len(moe_modules)) # Avoid divide by 0, just incase.
-                (loss / train_config.grad_acc).backward()
+                (total_loss / train_config.grad_acc).backward()
                 micro_step += 1
 
                 if micro_step % train_config.grad_acc == 0:
