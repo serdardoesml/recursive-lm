@@ -97,19 +97,17 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     if train_config.model_config.standard_gpt:
         for block in model.blocks:
             embed_params.append(block.attn.gate.bias)
-            embed_params += list(block.moe.router.parameters())
         block_params = []
         for block in model.blocks:
             block_params += list(block.attn.Wqkv.parameters())
             block_params += list(block.attn.Wo.parameters())
-            block_params += list(block.moe.experts.parameters())
+            block_params += list(block.moe.parameters())
             block_params.append(block.attn.gate.weight)
     else:
         embed_params.append(model.recursive_block.attn.gate.bias)
-        embed_params += list(model.recursive_block.moe.router.parameters())
         block_params = list(model.recursive_block.attn.Wqkv.parameters())
         block_params += list(model.recursive_block.attn.Wo.parameters())
-        block_params += list(model.recursive_block.moe.experts.parameters())
+        block_params += list(model.recursive_block.moe.parameters())
         block_params.append(model.recursive_block.attn.gate.weight)
 
     opt = SingleDeviceNorMuonWithAuxAdam(
@@ -241,19 +239,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                             profiler_started = True
                     else:
                         now = time.time()
-                        last_step_time = report_step(
-                            now,
-                            epoch_idx,
-                            step,
-                            total_steps,
-                            accum_loss,
-                            accum_lb_loss,
-                            train_config,
-                            scheduler,
-                            last_step_time,
-                            start_time,
-                            wandb_run,
-                        )
+                        last_step_time = report_step(now, epoch_idx, step, total_steps, accum_loss, accum_lb_loss, train_config, scheduler, last_step_time, start_time, wandb_run)
 
                         if profiler_started:
                             profiler.step()
