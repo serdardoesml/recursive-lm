@@ -132,10 +132,9 @@ class MoE(nn.Module):
         self.n_expert = config.n_expert
 
         # Since we use SimBal (https://arxiv.org/pdf/2506.14038v2) for loss balancing,
-        # it could be useful to initialize this as orthogonal. However the paper shows
-        # that just training for a few steps gets it close to orthogonal, so it's unnecessary.
-        # Note: With SimBal, router should probably be optimized with AdamW.
+        # Also initialize as orthogonal
         self.router = nn.Linear(config.n_hidden, self.n_expert, bias=False)
+        nn.init.orthogonal_(self.router.weight)
 
         # Modified to zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
         # SwiGLU by default
