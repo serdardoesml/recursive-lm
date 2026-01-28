@@ -203,6 +203,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                     lb_loss = logits.new_tensor(0.0)
                     for m in moe_modules:
                         W = m.router.weight.float()  # [E, D]
+                        W = F.normalize(W, p=2, dim=1)
                         G = W @ W.t()  # [E, E]
                         I = torch.eye(G.shape[0], device=G.device, dtype=G.dtype)
                         lb_loss = lb_loss + torch.norm(G - I, p=1)
