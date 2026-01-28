@@ -134,7 +134,8 @@ class MoE(nn.Module):
         # Since we use SimBal (https://arxiv.org/pdf/2506.14038v2) for loss balancing,
         # it could be useful to initialize this as orthogonal. However the paper shows
         # that just training for a few steps gets it close to orthogonal, so it's unnecessary.
-        self.router = nn.Linear(config.n_hidden, self.n_expert, bias=True)
+        # Note: With SimBal, router should probably be optimized with AdamW.
+        self.router = nn.Linear(config.n_hidden, self.n_expert, bias=False)
 
         # Modified to zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
         # SwiGLU by default
@@ -145,10 +146,7 @@ class MoE(nn.Module):
             top_k=self.top_k,
         )
 
-        # Init router bias as 0
-        nn.init.zeros_(self.router.bias)
-
-    def forward(self, x, training):
+    def forward(self, x):
         # x: [total_tokens, n_hidden]
         router_logits = self.router(x) # [N, n_expert]
         topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k, sorted=False) # [N, k]
@@ -166,12 +164,12 @@ class Block(nn.Module):
         self.attn = CausalVarlenSelfAttention(config, cos_cache, sin_cache)
         self.moe = MoE(config)
 
-    def forward(self, x, cu_seqlens, max_seqlen, position_ids, training, norm_attn, norm_mlp, norm_qk):
+    def forward(self, x, cu_seqlens, max_seqlen, position_ids, norm_attn, norm_mlp, norm_qk):
         # We do pre-norm and QK norm. 
         # We used to do a Gemma 3 style post-norm, but removed it to improve stability 
         # and keep the residual stream norm in check. Seems to work fine.
         x = x + self.attn(norm_attn(x), cu_seqlens, max_seqlen, position_ids, norm_qk)
-        x = x + self.moe(norm_mlp(x), training)
+        x = x + self.moe(norm_mlp(x))
         return x
 
 
@@ -257,18 +255,18 @@ class RecursiveGPT(nn.Module):
         else:
             for i in range(self.config.rec_depth):
                 if self.grad_checkpointing:
-                    def recursive_step(x, cu_seqlens, position_ids, training, i=i):
+                    def recursive_step(x, cu_seqlens, position_ids, i=i):
                         x = x + self.rec_layer_embedding.weight[i]
-                        return self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, training, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
+                        return self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
 
-                    x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, training, use_reentrant=False)
+                    x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, use_reentrant=False)
                 else:
                     x = x + self.rec_layer_embedding.weight[i]
-                    x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, training, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
+                    x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         return x
 
-    def forward(self, input_ids, cu_seqlens, position_ids, training=False):
-        x = self.forward_hidden(input_ids, cu_seqlens, position_ids, training)
+    def forward(self, input_ids, cu_seqlens, position_ids):
+        x = self.forward_hidden(input_ids, cu_seqlens, position_ids)
         if not self.config.tie_embed:
             return self.lm_head(self.norm_out(self.h_to_e(x))) # [total_tokens, vocab_size]
         else:

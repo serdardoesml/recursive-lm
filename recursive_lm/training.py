@@ -97,19 +97,19 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     if train_config.model_config.standard_gpt:
         for block in model.blocks:
             embed_params.append(block.attn.gate.bias)
-            embed_params.append(block.moe.router.bias)
+            embed_params += list(block.moe.router.parameters())
         block_params = []
         for block in model.blocks:
             block_params += list(block.attn.Wqkv.parameters())
             block_params += list(block.attn.Wo.parameters())
-            block_params += [p for p in block.moe.parameters() if p is not block.moe.router.bias]
+            block_params += list(block.moe.experts.parameters())
             block_params.append(block.attn.gate.weight)
     else:
         embed_params.append(model.recursive_block.attn.gate.bias)
-        embed_params.append(model.recursive_block.moe.router.bias)
+        embed_params += list(model.recursive_block.moe.router.parameters())
         block_params = list(model.recursive_block.attn.Wqkv.parameters())
         block_params += list(model.recursive_block.attn.Wo.parameters())
-        block_params += [p for p in model.recursive_block.moe.parameters() if p is not model.recursive_block.moe.router.bias]
+        block_params += list(model.recursive_block.moe.experts.parameters())
         block_params.append(model.recursive_block.attn.gate.weight)
 
     opt = SingleDeviceNorMuonWithAuxAdam(
@@ -198,7 +198,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 # Cast to bf16 for fast training with A100 and H100s .
                 # Varlen-attn doesn't support anything else, so no need to change this really. 
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    logits = model(input_ids, cu_seqlens, position_ids, True)
+                    logits = model(input_ids, cu_seqlens, position_ids)
                     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
                     # SimBal load balancing loss (https://arxiv.org/pdf/2506.14038v2)
@@ -214,7 +214,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 loss_float = float(loss.detach())
                 lb_loss_float = float(lb_loss.detach())
                 accum_loss += loss_float
-                accum_lb_loss += lb_loss_float / max(1, len(moe_modules)) # Avoid divide by 0, just incase.
+                accum_lb_loss += lb_loss_float
                 (total_loss / train_config.grad_acc).backward()
                 micro_step += 1
 
