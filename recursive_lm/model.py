@@ -242,16 +242,7 @@ class RecursiveGPT(nn.Module):
         x = self.e_to_h(self.embedding(input_ids))  # [total_tokens, n_hidden]
         if self.config.standard_gpt:
             for i in range(self.config.rec_depth):
-                x = self.blocks[i](
-                    x,
-                    cu_seqlens,
-                    self.config.rope_cache_len,
-                    position_ids,
-                    training,
-                    self.attn_norms[i],
-                    self.mlp_norms[i],
-                    self.qk_norms[i],
-                )
+                x = self.blocks[i](x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         else:
             for i in range(self.config.rec_depth):
                 if self.grad_checkpointing:
