@@ -200,6 +200,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
                     # SimBal load balancing loss (https://arxiv.org/pdf/2506.14038v2)
+                    # Modified to normalize router weights with l2 norm before calculating
                     lb_loss = logits.new_tensor(0.0)
                     for m in moe_modules:
                         W = m.router.weight.float()  # [E, D]
