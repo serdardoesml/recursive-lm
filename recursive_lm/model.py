@@ -19,6 +19,7 @@ class ModelConfig:
     n_head: int = 16 # number of attention heads
     n_hidden: int = 384
     n_wembed: int = 128
+    moe: bool = False
     n_expert: int = 4
     top_k: int = 2
     n_mlp_intermediate: int = 1536
@@ -157,18 +158,37 @@ class MoE(nn.Module):
 
         return self.experts(x, topk_gates, topk_idx)
     
+class DenseMLP(nn.Module):
+    # Standard dense SwiGLU MLP with zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
+    def __init__(self, config):
+        super().__init__()
+        self.c_fc = nn.Linear(config.n_hidden, 2 * config.n_mlp_intermediate, bias=False) # 2x for gating
+        self.c_proj = nn.Linear(config.n_mlp_intermediate, config.n_hidden, bias=False)
+        nn.init.zeros_(self.c_proj.weight)
+
+    def forward(self, x):
+        h, gates = self.c_fc(x).chunk(2, dim=-1)
+        return self.c_proj(F.silu(gates) * h)
+    
 class Block(nn.Module):
     def __init__(self, config, cos_cache, sin_cache):
         super().__init__()
+        self.use_moe = config.moe
         self.attn = CausalVarlenSelfAttention(config, cos_cache, sin_cache)
-        self.moe = MoE(config)
+        if self.use_moe:
+            self.moe = MoE(config)
+        else:
+            self.mlp = DenseMLP(config)
 
     def forward(self, x, cu_seqlens, max_seqlen, position_ids, norm_attn, norm_mlp, norm_qk):
         # We do pre-norm and QK norm. 
         # We used to do a Gemma 3 style post-norm, but removed it to improve stability 
         # and keep the residual stream norm in check. Seems to work fine.
         x = x + self.attn(norm_attn(x), cu_seqlens, max_seqlen, position_ids, norm_qk)
-        x = x + self.moe(norm_mlp(x))
+        if self.use_moe:
+            x = x + self.moe(norm_mlp(x))
+        else:
+            x = x + self.mlp(norm_mlp(x))
         return x
 
 
@@ -194,21 +214,25 @@ class RecursiveGPT(nn.Module):
         super().__init__()
         self.config = config
         self.grad_checkpointing = grad_checkpointing
+        self.use_factorized = config.n_wembed != config.n_hidden # Made FE optional
 
-        # Assert config is correct
         assert config.n_hidden % config.n_head == 0
 
         # We build cache then register it as a buffer later to ensure it gets moved to device together with the model
         cos_cache, sin_cache = RecursiveGPT.build_rope_cache(config.rope_cache_len, config.n_headdim)
 
         # Factorized Embeddings (https://arxiv.org/pdf/1909.11942)
-        self.embedding = nn.Embedding(config.vocab_size, config.n_wembed)
-        if not self.config.tie_embed:
-            self.lm_head = nn.Linear(config.n_wembed, config.vocab_size, bias=False)
-
-        self.e_to_h = nn.Linear(config.n_wembed, config.n_hidden, bias=False)
-        self.h_to_e = nn.Linear(config.n_hidden, config.n_wembed, bias=False)
-        self.norm_out = nn.RMSNorm(config.n_wembed, eps=1e-6, dtype=torch.bfloat16)
+        if self.use_factorized:
+            self.embedding = nn.Embedding(config.vocab_size, config.n_wembed)
+            if not self.config.tie_embed:
+                self.lm_head = nn.Linear(config.n_wembed, config.vocab_size, bias=False)
+            self.e_to_h = nn.Linear(config.n_wembed, config.n_hidden, bias=False)
+            self.h_to_e = nn.Linear(config.n_hidden, config.n_wembed, bias=False)
+        else:
+            self.embedding = nn.Embedding(config.vocab_size, config.n_hidden)
+            if not self.config.tie_embed:
+                self.lm_head = nn.Linear(config.n_hidden, config.vocab_size, bias=False)
+        self.norm_out = nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16)
 
         # Independent norms for each depth
         self.attn_norms = nn.ModuleList(
@@ -227,18 +251,17 @@ class RecursiveGPT(nn.Module):
             self.recursive_block = Block(config, cos_cache, sin_cache)
 
             # Per layer embeddings
-            # TODO: Explain the idea in more detail. 
-            # (Removed reference to RingFormers as this is fundamentally different and not dependent on input)
+            # TODO: Explain the idea in more detail and find a new name. 
             # We initialize at zero to let model start without any depth specific information and learn it gradually.
             # Bf16, shouldnt hurt stability, prevents casting issues
             self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_hidden, dtype=torch.bfloat16) 
             nn.init.zeros_(self.rec_layer_embedding.weight) 
 
-    def forward_hidden(self, input_ids, cu_seqlens, position_ids, training=False):
+    def forward_hidden(self, input_ids, cu_seqlens, position_ids):
         # TODO: Think about whether passing rope_cache_len as max_seqlen to flash-attn makes sense for inference
 
         # input_ids: [total_tokens] (flattened)
-        x = self.e_to_h(self.embedding(input_ids))  # [total_tokens, n_hidden]
+        x = self.e_to_h(self.embedding(input_ids)) if self.use_factorized else self.embedding(input_ids)  # [total_tokens, n_hidden]
         if self.config.standard_gpt:
             for i in range(self.config.rec_depth):
                 x = self.blocks[i](x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
@@ -257,10 +280,12 @@ class RecursiveGPT(nn.Module):
 
     def forward(self, input_ids, cu_seqlens, position_ids):
         x = self.forward_hidden(input_ids, cu_seqlens, position_ids)
+        x = self.norm_out(x)
+        if self.use_factorized:
+            x = self.h_to_e(x)
         if not self.config.tie_embed:
-            return self.lm_head(self.norm_out(self.h_to_e(x))) # [total_tokens, vocab_size]
-        else:
-            return F.linear(self.norm_out(self.h_to_e(x)), self.embedding.weight) # [total_tokens, vocab_size]
+            return self.lm_head(x) # [total_tokens, vocab_size]
+        return F.linear(x, self.embedding.weight) # [total_tokens, vocab_size]
         
     @property
     def total_param_size(self) -> int:

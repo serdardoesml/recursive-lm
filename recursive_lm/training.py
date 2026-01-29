@@ -84,8 +84,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     # We split params so only recursive block params use Muon, 
     # and everything else (embeddings and norms) uses AdamW.
     embed_params = list(model.embedding.parameters())
-    embed_params += list(model.e_to_h.parameters())
-    embed_params += list(model.h_to_e.parameters())
+    if getattr(model, "use_factorized", False):
+        embed_params += list(model.e_to_h.parameters())
+        embed_params += list(model.h_to_e.parameters())
     embed_params += list(model.norm_out.parameters())
     if hasattr(model, "lm_head"):
         embed_params += list(model.lm_head.parameters())
@@ -101,13 +102,19 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         for block in model.blocks:
             block_params += list(block.attn.Wqkv.parameters())
             block_params += list(block.attn.Wo.parameters())
-            block_params += list(block.moe.parameters())
+            if train_config.model_config.moe:
+                block_params += list(block.moe.parameters())
+            else:
+                block_params += list(block.mlp.parameters())
             block_params.append(block.attn.gate.weight)
     else:
         embed_params.append(model.recursive_block.attn.gate.bias)
         block_params = list(model.recursive_block.attn.Wqkv.parameters())
         block_params += list(model.recursive_block.attn.Wo.parameters())
-        block_params += list(model.recursive_block.moe.parameters())
+        if train_config.model_config.moe:
+            block_params += list(model.recursive_block.moe.parameters())
+        else:
+            block_params += list(model.recursive_block.mlp.parameters())
         block_params.append(model.recursive_block.attn.gate.weight)
 
     opt = SingleDeviceNorMuonWithAuxAdam(

@@ -32,6 +32,7 @@ parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
 parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
 parser.add_argument("--n_hidden", type=int, default=ModelConfig.n_hidden)
 parser.add_argument("--n_wembed", type=int, default=ModelConfig.n_wembed)
+parser.add_argument("--moe", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--n_expert", type=int, default=ModelConfig.n_expert)
 parser.add_argument("--top_k", type=int, default=ModelConfig.top_k)
 parser.add_argument("--n_mlp_intermediate", type=int, default=ModelConfig.n_mlp_intermediate)
@@ -57,6 +58,7 @@ model_config = ModelConfig(
     n_head=args.n_head,
     n_hidden=args.n_hidden,
     n_wembed=args.n_wembed,
+    moe=args.moe == "true",
     n_expert=args.n_expert,
     top_k=args.top_k,
     n_mlp_intermediate=args.n_mlp_intermediate,

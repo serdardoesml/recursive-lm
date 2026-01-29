@@ -115,8 +115,9 @@ def main():
         def _readout_last_logits(self, x_last: torch.Tensor) -> torch.Tensor:
             # x_last: [d]
             # Mirror model readout: h -> e -> vocab
-            x_n = F.linear(x_last, self.model.h_to_e.weight)
-            x_n = self.model.norm_out(x_n)
+            x_n = self.model.norm_out(x_last)
+            if getattr(self.model, "use_factorized", False):
+                x_n = self.model.h_to_e(x_n)
             if getattr(self.model.config, "tie_embed", False):
                 W = self.model.embedding.weight
             else:
