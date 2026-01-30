@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--model", type=str, required=True, help="Model filename under models/")
     parser.add_argument("--tokenizer", type=str, required=True, help="Tokenizer filename under tokenizers/")
     parser.add_argument("--gen_tok_count", type=int, default=64, help="Number of tokens to generate")
+    parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature (0 = greedy)")
     parser.add_argument("--prompt", type=str, default=None, help="Prompt text")
     parser.add_argument(
         "--analysis",
@@ -38,6 +39,8 @@ def main():
         help="Optional output stem (no extension) under analysis/; defaults to auto timestamped name",
     )
     args = parser.parse_args()
+    if args.analysis:
+        args.temperature = 0.0
 
     base_dir = get_base_dir()
     model_path = os.path.join(base_dir, "models", args.model)
@@ -395,7 +398,11 @@ def main():
                         logits = model(input_ids, cu_seqlens, position_ids)
                 else:
                     logits = model(input_ids, cu_seqlens, position_ids)
-                next_id = int(torch.argmax(logits[-1]).item())
+                if args.temperature <= 0:
+                    next_id = int(torch.argmax(logits[-1]).item())
+                else:
+                    probs = torch.softmax(logits[-1] / args.temperature, dim=-1)
+                    next_id = int(torch.multinomial(probs, num_samples=1).item())
                 tokens.append(next_id)
 
         print(tokenizer.decode(tokens))
