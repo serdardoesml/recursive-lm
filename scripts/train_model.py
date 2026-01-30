@@ -37,8 +37,8 @@ parser.add_argument("--n_expert", type=int, default=ModelConfig.n_expert)
 parser.add_argument("--top_k", type=int, default=ModelConfig.top_k)
 parser.add_argument("--n_mlp_intermediate", type=int, default=ModelConfig.n_mlp_intermediate)
 parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
+parser.add_argument("--std_depth", type=int, default=ModelConfig.std_depth)
 parser.add_argument("--tie_embed", type=str, choices=["true", "false"], default=ModelConfig.tie_embed)
-parser.add_argument("--standard_gpt", type=str, choices=["true", "false"], default="false") # For experiments
 parser.add_argument("--save", type=str, choices=["true", "false"], default="true")
 
 # Disable if having issues or constant recompilation
@@ -62,8 +62,8 @@ model_config = ModelConfig(
     top_k=args.top_k,
     n_mlp_intermediate=args.n_mlp_intermediate,
     rec_depth=args.rec_depth,
+    std_depth=args.std_depth,
     tie_embed=args.tie_embed == "true",
-    standard_gpt=args.standard_gpt == "true",
 )
 
 train_config = TrainingConfig(

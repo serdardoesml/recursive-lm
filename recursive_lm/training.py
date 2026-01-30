@@ -7,7 +7,8 @@ Note: At some point i tried prefetching the batch iterator, does not improve tot
 import torch
 import torch.nn.functional as F
 from .optimizer import SingleDeviceNorMuonWithAuxAdam
-from .model import RecursiveGPT, ModelConfig, MoE
+from .model import RecursiveGPT, ModelConfig
+from .block import MoE
 from .dataloader import batch_iterator
 from .common import get_base_dir
 
