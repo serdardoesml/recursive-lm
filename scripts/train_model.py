@@ -39,10 +39,9 @@ parser.add_argument("--n_mlp_intermediate", type=int, default=ModelConfig.n_mlp_
 parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
 parser.add_argument("--tie_embed", type=str, choices=["true", "false"], default=ModelConfig.tie_embed)
 parser.add_argument("--standard_gpt", type=str, choices=["true", "false"], default="false") # For experiments
-parser.add_argument("--grad_checkpointing", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--save", type=str, choices=["true", "false"], default="true")
 
-# Disable if having issues or constant recompilation, may not work with grad checkpointing
+# Disable if having issues or constant recompilation
 # Detailed explanation in training.py
 parser.add_argument("--torch_compile", type=str, choices=["true", "false", "max-autotune"], default="true")
 
@@ -89,7 +88,6 @@ train_config = TrainingConfig(
     grad_clip=args.grad_clip == "true",
     max_grad_norm=args.max_grad_norm,
     profile=args.profile == "true",
-    grad_checkpointing=args.grad_checkpointing == "true",
     torch_compile=args.torch_compile,
 )
 

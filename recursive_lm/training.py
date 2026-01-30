@@ -26,15 +26,6 @@ class TrainingConfig:
     wd_muon: float = 0.1
     lb_coef: float = 0.004
 
-    # MASSIVE reduction in memory use with grad checkpointing as it allows almost O(1) memory complexity for depth.
-    # However, adds some compute overhead (roughly 30% at depth 48) that cannot be easily recovered by reducing grad_acc
-    # Essentially makes training compute bound, useful for super high depths or large MLP multipliers on small GPUs.
-
-    # WARNING: Performance and memory use depends a lot on torch version, not sure how to interpret this. Further testing required.
-    # Overhead becomes even larger when accounting for torch.compile() in dynamic mode breaking with grad checkpointing.
-    # Update: Seems to "work" after switching to MoE for some reason, but ridiculously slow.
-    grad_checkpointing: bool = False 
-
     # Default target batch size: 65536 tok
     microbatch_tok: int = 32768
     grad_acc: int = 2
@@ -69,7 +60,6 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     train_config.model_config.rope_cache_len = train_config.sequence_len
     model = RecursiveGPT(
         train_config.model_config,
-        grad_checkpointing=train_config.grad_checkpointing,
     ).to(device) # Init model and move to device
 
     moe_modules = [m for m in model.modules() if isinstance(m, MoE)] # Keep track for balance stats
@@ -182,7 +172,6 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         "Training summary | "
         f"epochs {train_config.epoch} | "
         f"total_steps {total_steps} | "
-        f"grad_checkpointing {train_config.grad_checkpointing} | "
         f"torch_compile {train_config.torch_compile} | "
         f"lr_embed {train_config.lr_embed:.6g} | "
         f"lr_block {train_config.lr_block:.6g} | "

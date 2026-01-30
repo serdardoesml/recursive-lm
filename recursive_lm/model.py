@@ -3,7 +3,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.utils.checkpoint as checkpoint
 from scattermoe.mlp import GLUMLP # fast MoE (https://arxiv.org/pdf/2403.08245)
 from dataclasses import dataclass
 
@@ -210,10 +209,9 @@ class RecursiveGPT(nn.Module):
         cos, sin = freqs.cos(), freqs.sin()
         return cos.bfloat16(), sin.bfloat16() # Keep in bf16
 
-    def __init__(self, config: ModelConfig, grad_checkpointing: bool = False):
+    def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
-        self.grad_checkpointing = grad_checkpointing
         self.use_factorized = config.n_wembed != config.n_hidden # Made FE optional
 
         assert config.n_hidden % config.n_head == 0
@@ -267,15 +265,8 @@ class RecursiveGPT(nn.Module):
                 x = self.blocks[i](x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         else:
             for i in range(self.config.rec_depth):
-                if self.grad_checkpointing:
-                    def recursive_step(x, cu_seqlens, position_ids, i=i):
-                        x = x + self.rec_layer_embedding.weight[i]
-                        return self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
-
-                    x = checkpoint.checkpoint(recursive_step, x, cu_seqlens, position_ids, use_reentrant=False)
-                else:
-                    x = x + self.rec_layer_embedding.weight[i]
-                    x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
+                x = x + self.rec_layer_embedding.weight[i]
+                x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         return x
 
     def forward(self, input_ids, cu_seqlens, position_ids):
