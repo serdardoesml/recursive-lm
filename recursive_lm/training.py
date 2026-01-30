@@ -57,7 +57,7 @@ class TrainingConfig:
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
     if train_config.profile:
         save = False
-    train_config.model_config.rope_cache_len = train_config.sequence_len
+    train_config.model_config.rope_cache_len = train_config.sequence_len # Avoids inefficiency as this gets passed into varlen_attn as max_seqlen, probably better way to handle this though
     model = RecursiveGPT(
         train_config.model_config,
     ).to(device) # Init model and move to device

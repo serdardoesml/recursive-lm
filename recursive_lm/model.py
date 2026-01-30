@@ -170,7 +170,7 @@ class DenseMLP(nn.Module):
         return self.c_proj(F.silu(gates) * h)
     
 class Block(nn.Module):
-    def __init__(self, config, cos_cache, sin_cache):
+    def __init__(self, config: ModelConfig, cos_cache, sin_cache):
         super().__init__()
         self.use_moe = config.moe
         self.attn = CausalVarlenSelfAttention(config, cos_cache, sin_cache)
@@ -191,6 +191,48 @@ class Block(nn.Module):
         return x
 
 
+class StandardBlocks(nn.Module):
+    def __init__(self, config: ModelConfig, cos_cache, sin_cache):
+        super().__init__()
+        self.depth = config.rec_depth
+
+        # Independent norms for each depth
+        self.attn_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        self.mlp_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        self.qk_norms = nn.ModuleList([nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+
+        self.blocks = nn.ModuleList([Block(config, cos_cache, sin_cache) for _ in range(self.depth)])
+
+    def forward(self, x, cu_seqlens, max_seqlen, position_ids):
+        for i in range(self.depth):
+            x = self.blocks[i](x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
+        return x
+
+class RecursiveBlocks(nn.Module):
+    def __init__(self, config: ModelConfig, cos_cache, sin_cache):
+        super().__init__()
+        self.depth = config.rec_depth
+
+        # Independent norms for each depth
+        self.attn_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        self.mlp_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        self.qk_norms = nn.ModuleList([nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+
+        self.recursive_block = Block(config, cos_cache, sin_cache)
+
+        # Per layer embeddings
+        # TODO: Explain the idea in more detail and find a new name. 
+        # We initialize at zero to let model start without any depth specific information and learn it gradually.
+        # Bf16, shouldnt hurt stability, prevents casting issues
+        self.rec_layer_embedding = nn.Embedding(self.depth, config.n_hidden, dtype=torch.bfloat16) 
+        nn.init.zeros_(self.rec_layer_embedding.weight) 
+
+    def forward(self, x, cu_seqlens, max_seqlen, position_ids):
+        for i in range(self.depth):
+            x = x + self.rec_layer_embedding.weight[i]
+            x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
+        return x
+    
 class RecursiveGPT(nn.Module):
     @staticmethod
     def build_rope_cache(max_seqlen, head_dim, device=None): 
@@ -231,43 +273,18 @@ class RecursiveGPT(nn.Module):
             if not self.config.tie_embed:
                 self.lm_head = nn.Linear(config.n_hidden, config.vocab_size, bias=False)
         self.norm_out = nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16)
-
-        # Independent norms for each depth
-        self.attn_norms = nn.ModuleList(
-            [nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(config.rec_depth)]
-        )
-        self.mlp_norms = nn.ModuleList(
-            [nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(config.rec_depth)]
-        )
-        self.qk_norms = nn.ModuleList(
-            [nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(config.rec_depth)]
-        )
         
         if config.standard_gpt:
-            self.blocks = nn.ModuleList([Block(config, cos_cache, sin_cache) for _ in range(config.rec_depth)])
+            self.blocks = StandardBlocks(config, cos_cache, sin_cache)
         else:
-            self.recursive_block = Block(config, cos_cache, sin_cache)
-
-            # Per layer embeddings
-            # TODO: Explain the idea in more detail and find a new name. 
-            # We initialize at zero to let model start without any depth specific information and learn it gradually.
-            # Bf16, shouldnt hurt stability, prevents casting issues
-            self.rec_layer_embedding = nn.Embedding(config.rec_depth, config.n_hidden, dtype=torch.bfloat16) 
-            nn.init.zeros_(self.rec_layer_embedding.weight) 
+            self.blocks = RecursiveBlocks(config, cos_cache, sin_cache)
 
     def forward_hidden(self, input_ids, cu_seqlens, position_ids):
         # TODO: Think about whether passing rope_cache_len as max_seqlen to flash-attn makes sense for inference
 
         # input_ids: [total_tokens] (flattened)
         x = self.e_to_h(self.embedding(input_ids)) if self.use_factorized else self.embedding(input_ids)  # [total_tokens, n_hidden]
-        if self.config.standard_gpt:
-            for i in range(self.config.rec_depth):
-                x = self.blocks[i](x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
-        else:
-            for i in range(self.config.rec_depth):
-                x = x + self.rec_layer_embedding.weight[i]
-                x = self.recursive_block(x, cu_seqlens, self.config.rope_cache_len, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
-        return x
+        return self.blocks(x, cu_seqlens, self.config.rope_cache_len, position_ids)
 
     def forward(self, input_ids, cu_seqlens, position_ids):
         x = self.forward_hidden(input_ids, cu_seqlens, position_ids)
