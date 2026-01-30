@@ -207,6 +207,23 @@ class StandardBlocks(nn.Module):
         for i in range(self.depth):
             x = self.blocks[i](x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         return x
+    
+    def get_param_groups(self):
+        adam_params = []
+        muon_params = []
+        adam_params += list(self.attn_norms.parameters())
+        adam_params += list(self.mlp_norms.parameters())
+        adam_params += list(self.qk_norms.parameters())
+        for block in self.blocks:
+            adam_params.append(block.attn.gate.bias)
+            muon_params += list(block.attn.Wqkv.parameters())
+            muon_params += list(block.attn.Wo.parameters())
+            if block.use_moe:
+                muon_params += list(block.moe.parameters())
+            else:
+                muon_params += list(block.mlp.parameters())
+            muon_params.append(block.attn.gate.weight)
+        return adam_params, muon_params
 
 class RecursiveBlocks(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
@@ -232,6 +249,23 @@ class RecursiveBlocks(nn.Module):
             x = x + self.rec_layer_embedding.weight[i]
             x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         return x
+    
+    def get_param_groups(self):
+        adam_params = []
+        muon_params = []
+        adam_params += list(self.rec_layer_embedding.parameters())
+        adam_params += list(self.attn_norms.parameters())
+        adam_params += list(self.mlp_norms.parameters())
+        adam_params += list(self.qk_norms.parameters())
+        adam_params.append(self.recursive_block.attn.gate.bias)
+        muon_params += list(self.recursive_block.attn.Wqkv.parameters())
+        muon_params += list(self.recursive_block.attn.Wo.parameters())
+        if self.recursive_block.use_moe:
+            muon_params += list(self.recursive_block.moe.parameters())
+        else:
+            muon_params += list(self.recursive_block.mlp.parameters())
+        muon_params.append(self.recursive_block.attn.gate.weight)
+        return adam_params, muon_params
     
 class RecursiveGPT(nn.Module):
     @staticmethod
@@ -298,3 +332,15 @@ class RecursiveGPT(nn.Module):
     @property
     def total_param_size(self) -> int:
         return sum(p.numel() for p in self.parameters())
+    
+    def get_param_groups(self):
+        adam_params = list(self.embedding.parameters())
+        if self.use_factorized:
+            adam_params += list(self.e_to_h.parameters())
+            adam_params += list(self.h_to_e.parameters())
+        adam_params += list(self.norm_out.parameters())
+        if hasattr(self, "lm_head"):
+            adam_params += list(self.lm_head.parameters())
+        block_adam_params, block_muon_params = self.blocks.get_param_groups()
+        adam_params += block_adam_params
+        return adam_params, block_muon_params

@@ -71,46 +71,14 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         model = torch.compile(model, **compile_kwargs)
 
     # Set up param groups.
-    # We split params so only recursive block params use Muon, 
+    # We split params so only block params use Muon,
     # and everything else (embeddings and norms) uses AdamW.
-    embed_params = list(model.embedding.parameters())
-    if getattr(model, "use_factorized", False):
-        embed_params += list(model.e_to_h.parameters())
-        embed_params += list(model.h_to_e.parameters())
-    embed_params += list(model.norm_out.parameters())
-    if hasattr(model, "lm_head"):
-        embed_params += list(model.lm_head.parameters())
-    if hasattr(model, "rec_layer_embedding"):
-        embed_params += list(model.rec_layer_embedding.parameters())
-    embed_params += list(model.attn_norms.parameters())
-    embed_params += list(model.mlp_norms.parameters())
-    embed_params += list(model.qk_norms.parameters())
-    if train_config.model_config.standard_gpt:
-        for block in model.blocks:
-            embed_params.append(block.attn.gate.bias)
-        block_params = []
-        for block in model.blocks:
-            block_params += list(block.attn.Wqkv.parameters())
-            block_params += list(block.attn.Wo.parameters())
-            if train_config.model_config.moe:
-                block_params += list(block.moe.parameters())
-            else:
-                block_params += list(block.mlp.parameters())
-            block_params.append(block.attn.gate.weight)
-    else:
-        embed_params.append(model.recursive_block.attn.gate.bias)
-        block_params = list(model.recursive_block.attn.Wqkv.parameters())
-        block_params += list(model.recursive_block.attn.Wo.parameters())
-        if train_config.model_config.moe:
-            block_params += list(model.recursive_block.moe.parameters())
-        else:
-            block_params += list(model.recursive_block.mlp.parameters())
-        block_params.append(model.recursive_block.attn.gate.weight)
+    adam_params, muon_params = model.get_param_groups()
 
     opt = SingleDeviceNorMuonWithAuxAdam(
         [
-            {"params": embed_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
-            {"params": block_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": train_config.wd_muon},
+            {"params": adam_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
+            {"params": muon_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": train_config.wd_muon},
         ]
     ) # NorMuon optimizer with CWD (References in optimizer.py)
 
