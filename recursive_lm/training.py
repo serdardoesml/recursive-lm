@@ -8,7 +8,6 @@ import torch
 import torch.nn.functional as F
 from .optimizer import SingleDeviceNorMuonWithAuxAdam
 from .model import RecursiveGPT, ModelConfig
-from .block import MoE
 from .dataloader import batch_iterator
 from .common import get_base_dir
 
@@ -63,7 +62,12 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         train_config.model_config,
     ).to(device) # Init model and move to device
 
-    moe_modules = [m for m in model.modules() if isinstance(m, MoE)] # Keep track for balance stats
+    # Keep track of routers for lb loss
+    routers = []
+    if hasattr(model, "std_blocks") and hasattr(model.std_blocks, "routers"):
+        routers += list(model.std_blocks.routers)
+    if hasattr(model, "rec_blocks") and hasattr(model.rec_blocks, "routers"):
+        routers += list(model.rec_blocks.routers)
 
     if train_config.torch_compile != "false":
         compile_kwargs = {} # After fixing token shape, setting dynamic to either true or false makes performance worse, as it's mostly static except for cu_seqlens
@@ -167,8 +171,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                     # SimBal load balancing loss (https://arxiv.org/pdf/2506.14038v2)
                     # Modified to normalize router weights with l2 norm before calculating
                     lb_loss = logits.new_tensor(0.0)
-                    for m in moe_modules:
-                        W = m.router.weight.float()  # [E, D]
+                    for router in routers:
+                        W = router.weight.float()  # [E, D]
                         W = F.normalize(W, p=2, dim=1)
                         G = W @ W.t()  # [E, E]
                         I = torch.eye(G.shape[0], device=G.device, dtype=G.dtype)
