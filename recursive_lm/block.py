@@ -106,11 +106,6 @@ class MoE(nn.Module):
         self.top_k = config.top_k
         self.n_expert = config.n_expert
 
-        # Since we use SimBal (https://arxiv.org/pdf/2506.14038v2) for loss balancing,
-        # Also initialize as orthogonal
-        self.router = nn.Linear(config.n_hidden, self.n_expert, bias=False)
-        nn.init.orthogonal_(self.router.weight)
-
         # Modified to zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
         # SwiGLU by default
         self.experts = GLUMLP( 
@@ -120,9 +115,9 @@ class MoE(nn.Module):
             top_k=self.top_k,
         )
 
-    def forward(self, x):
+    def forward(self, x, router):
         # x: [total_tokens, n_hidden]
-        router_logits = self.router(x) # [N, n_expert]
+        router_logits = router(x) # [N, n_expert]
         topk_vals, topk_idx = torch.topk(router_logits, k=self.top_k, sorted=False) # [N, k]
         topk_idx = topk_idx.to(torch.int32)
 
@@ -154,13 +149,14 @@ class Block(nn.Module):
         else:
             self.mlp = DenseMLP(config)
 
-    def forward(self, x, cu_seqlens, max_seqlen, position_ids, norm_attn, norm_mlp, norm_qk):
+    def forward(self, x, cu_seqlens, max_seqlen, position_ids, norm_attn, norm_mlp, norm_qk, router=None):
         # We do pre-norm and QK norm. 
         # We used to do a Gemma 3 style post-norm, but removed it to improve stability 
         # and keep the residual stream norm in check. Seems to work fine.
         x = x + self.attn(norm_attn(x), cu_seqlens, max_seqlen, position_ids, norm_qk)
         if self.use_moe:
-            x = x + self.moe(norm_mlp(x))
+            # Router is passed in to allow for independent routers with recursive blocks
+            x = x + self.moe(norm_mlp(x), router) 
         else:
             x = x + self.mlp(norm_mlp(x))
         return x

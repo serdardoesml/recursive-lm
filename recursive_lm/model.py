@@ -30,17 +30,29 @@ class StandardBlocks(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
         super().__init__()
         self.depth = config.std_depth
+        self.moe = config.moe
 
         # Independent norms for each depth
         self.attn_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
         self.mlp_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
         self.qk_norms = nn.ModuleList([nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
 
+        if self.moe:
+            # Independent routers for each depth
+            self.routers = nn.ModuleList([nn.Linear(config.n_hidden, config.n_expert, bias=False) for _ in range(self.depth)])
+            
+            # Orthogonal init for routers (since we use SimBal loss)
+            for rt in self.routers:
+                nn.init.orthogonal_(rt.weight)
+
         self.blocks = nn.ModuleList([Block(config, cos_cache, sin_cache) for _ in range(self.depth)])
 
     def forward(self, x, cu_seqlens, max_seqlen, position_ids):
         for i in range(self.depth):
-            x = self.blocks[i](x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
+            if self.moe:
+                x = self.blocks[i](x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i], self.routers[i])
+            else:
+                x = self.blocks[i](x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         return x
     
     def get_param_groups(self):
@@ -49,6 +61,8 @@ class StandardBlocks(nn.Module):
         adam_params += list(self.attn_norms.parameters())
         adam_params += list(self.mlp_norms.parameters())
         adam_params += list(self.qk_norms.parameters())
+        if self.moe:
+            muon_params += list(self.routers.parameters())
         for block in self.blocks:
             adam_params.append(block.attn.gate.bias)
             muon_params += list(block.attn.Wqkv.parameters())
@@ -64,11 +78,20 @@ class RecursiveBlocks(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
         super().__init__()
         self.depth = config.rec_depth
+        self.moe = config.moe
 
         # Independent norms for each depth
         self.attn_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
         self.mlp_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
         self.qk_norms = nn.ModuleList([nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+
+        if self.moe:
+            # Independent routers for each depth
+            self.routers = nn.ModuleList([nn.Linear(config.n_hidden, config.n_expert, bias=False) for _ in range(self.depth)])
+
+            # Orthogonal init for routers (since we use SimBal loss)
+            for rt in self.routers:
+                nn.init.orthogonal_(rt.weight)
 
         self.recursive_block = Block(config, cos_cache, sin_cache)
 
@@ -82,7 +105,10 @@ class RecursiveBlocks(nn.Module):
     def forward(self, x, cu_seqlens, max_seqlen, position_ids):
         for i in range(self.depth):
             x = x + self.rec_layer_embedding.weight[i]
-            x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
+            if self.moe:
+                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i], self.routers[i])
+            else:
+                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         return x
     
     def get_param_groups(self):
@@ -92,6 +118,8 @@ class RecursiveBlocks(nn.Module):
         adam_params += list(self.attn_norms.parameters())
         adam_params += list(self.mlp_norms.parameters())
         adam_params += list(self.qk_norms.parameters())
+        if self.moe:
+            muon_params += list(self.routers.parameters())
         adam_params.append(self.recursive_block.attn.gate.bias)
         muon_params += list(self.recursive_block.attn.Wqkv.parameters())
         muon_params += list(self.recursive_block.attn.Wo.parameters())
