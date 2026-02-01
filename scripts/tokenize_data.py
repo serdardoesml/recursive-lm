@@ -26,6 +26,7 @@ def raw_text_iterator():
         buf = ""
         for line in f:
             if total >= args.max_chars:
+                print("Stopping as max_chars reached.")
                 break
             if total + len(line) > args.max_chars:
                 line = line[: args.max_chars - total]
