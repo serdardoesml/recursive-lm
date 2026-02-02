@@ -147,8 +147,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "
         f"wd_muon {train_config.wd_muon:.6g} | "
-        f"total distinct params {model.total_param_size:,}"
-        f"embed distinct params {model.embed_param_size:,}"
+        f"total distinct params {model.total_param_size:,} |"
+        f"embed distinct params {model.embed_param_size:,} |"
         f"block distinct params {model.block_param_size:,}"
     )
 
