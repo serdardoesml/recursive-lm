@@ -149,14 +149,12 @@ class Block(nn.Module):
         else:
             self.mlp = DenseMLP(config)
 
-    def forward(self, x, cu_seqlens, max_seqlen, position_ids, norm_attn, norm_mlp, norm_qk, router=None):
-        # We do pre-norm and QK norm. 
-        # We used to do a Gemma 3 style post-norm, but removed it to improve stability 
-        # and keep the residual stream norm in check. Seems to work fine.
-        x = x + self.attn(norm_attn(x), cu_seqlens, max_seqlen, position_ids, norm_qk)
+    def forward(self, x, cu_seqlens, max_seqlen, position_ids, norm_attn_in, norm_mlp_in, norm_attn_out, norm_mlp_out, attn_res, mlp_res, norm_qk, router=None):
+        # We implement KEEL normalization by bytedance to allow for better gradient flow (https://arxiv.org/pdf/2601.19895)
+        x = norm_attn_out((x * attn_res) + self.attn(norm_attn_in(x), cu_seqlens, max_seqlen, position_ids, norm_qk))
         if self.use_moe:
             # Router is passed in to allow for independent routers with recursive blocks
-            x = x + self.moe(norm_mlp(x), router) 
+            x = norm_mlp_out((x * mlp_res) + self.moe(norm_mlp_in(x), router)) 
         else:
-            x = x + self.mlp(norm_mlp(x))
+            x = norm_mlp_out((x * mlp_res) + self.mlp(norm_mlp_in(x)))
         return x

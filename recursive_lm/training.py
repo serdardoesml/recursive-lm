@@ -75,15 +75,12 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             compile_kwargs["mode"] = "max-autotune-no-cudagraphs"
         model = torch.compile(model, **compile_kwargs)
 
-    # Set up param groups.
     # We split params so only block params use Muon,
     # and everything else (embeddings and norms) uses AdamW.
-    adam_params, muon_params = model.get_param_groups()
-
     opt = SingleDeviceNorMuonWithAuxAdam(
         [
-            {"params": adam_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
-            {"params": muon_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": train_config.wd_muon},
+            {"params": model.adam_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
+            {"params": model.muon_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": train_config.wd_muon},
         ]
     ) # NorMuon optimizer with CWD (References in optimizer.py)
 
@@ -150,7 +147,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "
         f"wd_muon {train_config.wd_muon:.6g} | "
-        f"distinct params {model.total_param_size:,}"
+        f"total distinct params {model.total_param_size:,}"
+        f"embed distinct params {model.embed_param_size:,}"
+        f"block distinct params {model.block_param_size:,}"
     )
 
     try:
