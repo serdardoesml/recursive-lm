@@ -32,15 +32,10 @@ class StandardBlocks(nn.Module):
         self.depth = config.std_depth
         self.moe = config.moe
 
-        # Independent norms and residual scalars for each depth
-        self.attn_in_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.mlp_in_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.attn_out_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.mlp_out_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        # Independent norms for each depth
+        self.attn_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        self.mlp_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
         self.qk_norms = nn.ModuleList([nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-
-        self.attn_res_scales = nn.ParameterList([nn.Parameter(torch.ones(1)) for _ in range(self.depth)])
-        self.mlp_res_scales = nn.ParameterList([nn.Parameter(torch.ones(1)) for _ in range(self.depth)])
 
         if self.moe:
             # Independent routers for each depth
@@ -55,9 +50,9 @@ class StandardBlocks(nn.Module):
     def forward(self, x, cu_seqlens, max_seqlen, position_ids):
         for i in range(self.depth):
             if self.moe:
-                x = self.blocks[i](x, cu_seqlens, max_seqlen, position_ids, self.attn_in_norms[i], self.mlp_in_norms[i], self.attn_out_norms[i], self.mlp_out_norms[i], self.attn_res_scales[i], self.mlp_res_scales[i], self.qk_norms[i], self.routers[i])
+                x = self.blocks[i](x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i], self.routers[i])
             else:
-                x = self.blocks[i](x, cu_seqlens, max_seqlen, position_ids, self.attn_in_norms[i], self.mlp_in_norms[i], self.attn_out_norms[i], self.mlp_out_norms[i], self.attn_res_scales[i], self.mlp_res_scales[i], self.qk_norms[i])
+                x = self.blocks[i](x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         return x
     
     def get_param_groups(self):
@@ -82,15 +77,10 @@ class RecursiveBlocks(nn.Module):
         self.depth = config.rec_depth
         self.moe = config.moe
 
-        # Independent norms and residual scalars for each depth
-        self.attn_in_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.mlp_in_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.attn_out_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.mlp_out_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        # Independent norms for each depth
+        self.attn_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        self.mlp_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
         self.qk_norms = nn.ModuleList([nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-
-        self.attn_res_scales = nn.ParameterList([nn.Parameter(torch.ones(1)) for _ in range(self.depth)])
-        self.mlp_res_scales = nn.ParameterList([nn.Parameter(torch.ones(1)) for _ in range(self.depth)])
 
         if self.moe:
             # Independent routers for each depth
@@ -113,9 +103,9 @@ class RecursiveBlocks(nn.Module):
         for i in range(self.depth):
             x = x + self.rec_layer_embedding.weight[i]
             if self.moe:
-                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_in_norms[i], self.mlp_in_norms[i], self.attn_out_norms[i], self.mlp_out_norms[i], self.attn_res_scales[i], self.mlp_res_scales[i], self.qk_norms[i], self.routers[i])
+                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i], self.routers[i])
             else:
-                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_in_norms[i], self.mlp_in_norms[i], self.attn_out_norms[i], self.mlp_out_norms[i], self.attn_res_scales[i], self.mlp_res_scales[i], self.qk_norms[i])
+                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
         return x
     
     def get_param_groups(self):
