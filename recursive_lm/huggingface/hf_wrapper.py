@@ -183,7 +183,12 @@ class RecursiveLMPreTrainedModel(PreTrainedModel):
                 dtype=self.model.embedding.weight.dtype,
             )
         else:
-            hidden_flat = self.model.forward_hidden(flat_input, cu_seqlens, position_ids)
+            if input_ids.device.type == "cuda":
+                autocast_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+                with torch.autocast(device_type="cuda", dtype=autocast_dtype):
+                    hidden_flat = self.model.forward_hidden(flat_input, cu_seqlens, position_ids)
+            else:
+                hidden_flat = self.model.forward_hidden(flat_input, cu_seqlens, position_ids)
             if attention_mask is None:
                 hidden = self._pad_packed(hidden_flat, lengths, seq_len)
             else:
