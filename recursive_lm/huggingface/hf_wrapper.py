@@ -5,6 +5,7 @@ Requires uv group 'hf'.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import asdict
 from typing import Optional
 
@@ -108,6 +109,14 @@ class RecursiveLMPreTrainedModel(PreTrainedModel):
         self.model.embedding = value
 
     @staticmethod
+    def _cuda_autocast(device: torch.device):
+        if device.type == "cuda":
+            if not torch.cuda.is_bf16_supported():
+                raise RuntimeError("RecursiveLM HF wrapper requires CUDA bfloat16 support.")
+            return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        return nullcontext()
+
+    @staticmethod
     def _normalize_inputs(
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
@@ -183,11 +192,7 @@ class RecursiveLMPreTrainedModel(PreTrainedModel):
                 dtype=self.model.embedding.weight.dtype,
             )
         else:
-            if input_ids.device.type == "cuda":
-                autocast_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-                with torch.autocast(device_type="cuda", dtype=autocast_dtype):
-                    hidden_flat = self.model.forward_hidden(flat_input, cu_seqlens, position_ids)
-            else:
+            with self._cuda_autocast(input_ids.device):
                 hidden_flat = self.model.forward_hidden(flat_input, cu_seqlens, position_ids)
             if attention_mask is None:
                 hidden = self._pad_packed(hidden_flat, lengths, seq_len)
@@ -226,14 +231,15 @@ class RecursiveLMForCausalLM(RecursiveLMPreTrainedModel):
     ) -> CausalLMOutputWithPast:
         input_ids, attention_mask, labels = self._normalize_inputs(input_ids, attention_mask, labels)
         batch_size, seq_len = input_ids.shape
-        hidden, _ = self._forward_hidden(input_ids, attention_mask)
-        hidden = self.model.norm_out(hidden)
-        if self.model.use_factorized:
-            hidden = self.model.h_to_e(hidden)
-        if not self.config.tie_embed:
-            logits = self.model.lm_head(hidden)
-        else:
-            logits = F.linear(hidden, self.model.embedding.weight)
+        with self._cuda_autocast(input_ids.device):
+            hidden, _ = self._forward_hidden(input_ids, attention_mask)
+            hidden = self.model.norm_out(hidden)
+            if self.model.use_factorized:
+                hidden = self.model.h_to_e(hidden)
+            if not self.config.tie_embed:
+                logits = self.model.lm_head(hidden)
+            else:
+                logits = F.linear(hidden, self.model.embedding.weight)
 
         if logits.size(1) < seq_len:
             logits = torch.zeros(
@@ -279,8 +285,9 @@ class RecursiveLMModel(RecursiveLMPreTrainedModel):
         **kwargs,
     ) -> BaseModelOutputWithPast:
         input_ids, attention_mask, _ = self._normalize_inputs(input_ids, attention_mask, None)
-        hidden, _ = self._forward_hidden(input_ids, attention_mask)
-        hidden = self.model.norm_out(hidden)
+        with self._cuda_autocast(input_ids.device):
+            hidden, _ = self._forward_hidden(input_ids, attention_mask)
+            hidden = self.model.norm_out(hidden)
 
         return_dict = kwargs.get("return_dict", self.config.use_return_dict)
         if not return_dict:
@@ -306,17 +313,18 @@ class RecursiveLMForSequenceClassification(RecursiveLMPreTrainedModel):
         **kwargs,
     ) -> SequenceClassifierOutput:
         input_ids, attention_mask, labels = self._normalize_inputs(input_ids, attention_mask, labels)
-        hidden, lengths = self._forward_hidden(input_ids, attention_mask)
-        hidden = self.model.norm_out(hidden)
+        with self._cuda_autocast(input_ids.device):
+            hidden, lengths = self._forward_hidden(input_ids, attention_mask)
+            hidden = self.model.norm_out(hidden)
 
-        if attention_mask is not None:
-            pooled_idx = attention_mask.to(dtype=torch.long).sum(dim=1) - 1
-        else:
-            pooled_idx = lengths.to(dtype=torch.long) - 1
-        pooled_idx = pooled_idx.clamp(min=0)
+            if attention_mask is not None:
+                pooled_idx = attention_mask.to(dtype=torch.long).sum(dim=1) - 1
+            else:
+                pooled_idx = lengths.to(dtype=torch.long) - 1
+            pooled_idx = pooled_idx.clamp(min=0)
 
-        pooled = hidden[torch.arange(hidden.size(0), device=hidden.device), pooled_idx]
-        logits = self.score(pooled)
+            pooled = hidden[torch.arange(hidden.size(0), device=hidden.device), pooled_idx]
+            logits = self.score(pooled)
 
         loss = None
         if labels is not None:
