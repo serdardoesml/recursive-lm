@@ -48,7 +48,7 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
         return self
 
     @classmethod
-    def register_for_auto_class(cls, auto_class: str = "AutoProcessor"):
+    def register_for_auto_class(cls, auto_class: str = "AutoTokenizer"):
         cls._auto_class = auto_class
         return cls
 
@@ -75,15 +75,36 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
         max_length = kwargs.pop("max_length", None)
         return_attention_mask = kwargs.pop("return_attention_mask", True)
         return_token_type_ids = kwargs.pop("return_token_type_ids", False)
+        return_special_tokens_mask = kwargs.pop("return_special_tokens_mask", False)
+        return_length = kwargs.pop("return_length", False)
+        pad_to_multiple_of = kwargs.pop("pad_to_multiple_of", None)
+        is_split_into_words = kwargs.pop("is_split_into_words", False)
+        return_overflowing_tokens = kwargs.pop("return_overflowing_tokens", False)
+        stride = kwargs.pop("stride", 0)
+        if kwargs.pop("text_target", None) is not None:
+            raise ValueError("text_target is not supported for RecursiveLMTokenizer.")
+        kwargs.pop("verbose", None)
+        kwargs.pop("clean_up_tokenization_spaces", None)
+        if is_split_into_words:
+            raise ValueError("is_split_into_words=True is not supported for RecursiveLMTokenizer.")
+        if return_overflowing_tokens:
+            raise ValueError("return_overflowing_tokens=True is not supported for RecursiveLMTokenizer.")
+        if stride:
+            raise ValueError("stride is not supported for RecursiveLMTokenizer.")
+        add_special_tokens = kwargs.pop("add_special_tokens", True)
 
         pairs: list[tuple[str, str | None]]
+        is_single = isinstance(text, str)
         if isinstance(text, (list, tuple)):
             if text_pair is None and text and isinstance(text[0], (list, tuple)):
                 pairs = [(a, b) for a, b in text]
+                is_single = False
             elif text_pair is not None:
                 pairs = list(zip(text, text_pair))
+                is_single = False
             else:
                 pairs = [(t, None) for t in text]
+                is_single = False
         else:
             pairs = [(text, text_pair)]
 
@@ -95,6 +116,8 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
             ids_a = self._tokenizer.encode(a) if a is not None else []
             ids_b = self._tokenizer.encode(b) if b is not None else []
             input_ids = ids_a + ids_b
+            if add_special_tokens:
+                input_ids = self.build_inputs_with_special_tokens(ids_a, ids_b if b is not None else None)
             token_type_ids = [0] * len(ids_a) + [1] * len(ids_b)
 
             offsets = None
@@ -126,8 +149,14 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
             pad_to_length = max(len(ids) for ids in input_ids_batch) if input_ids_batch else 0
         elif padding == "max_length":
             pad_to_length = max_length
+        if pad_to_length is not None and pad_to_multiple_of is not None and pad_to_multiple_of > 0:
+            remainder = pad_to_length % pad_to_multiple_of
+            if remainder != 0:
+                pad_to_length += pad_to_multiple_of - remainder
 
         attention_mask_batch = []
+        special_tokens_mask_batch = []
+        length_batch = []
         if pad_to_length is not None:
             pad_id = self.pad_token_id if self.pad_token_id is not None else 0
             for i, ids in enumerate(input_ids_batch):
@@ -147,8 +176,16 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
                         offsets_batch[i] = offsets_batch[i] + [(0, 0)] * pad_len
                     attn = [1] * len(ids) + [0] * pad_len
                 attention_mask_batch.append(attn)
+                if return_special_tokens_mask:
+                    special_tokens_mask_batch.append([0] * pad_to_length)
+                if return_length:
+                    length_batch.append(len(ids))
         else:
             attention_mask_batch = [[1] * len(ids) for ids in input_ids_batch]
+            if return_special_tokens_mask:
+                special_tokens_mask_batch = [[0] * len(ids) for ids in input_ids_batch]
+            if return_length:
+                length_batch = [len(ids) for ids in input_ids_batch]
 
         enc = {"input_ids": input_ids_batch}
         if return_attention_mask:
@@ -157,6 +194,23 @@ class RecursiveLMTokenizer(PreTrainedTokenizer):
             enc["token_type_ids"] = token_type_ids_batch
         if return_offsets_mapping:
             enc["offset_mapping"] = offsets_batch
+        if return_special_tokens_mask:
+            enc["special_tokens_mask"] = special_tokens_mask_batch
+        if return_length:
+            enc["length"] = length_batch
+
+        if is_single and return_tensors is None:
+            enc["input_ids"] = enc["input_ids"][0]
+            if "attention_mask" in enc:
+                enc["attention_mask"] = enc["attention_mask"][0]
+            if "token_type_ids" in enc:
+                enc["token_type_ids"] = enc["token_type_ids"][0]
+            if "offset_mapping" in enc:
+                enc["offset_mapping"] = enc["offset_mapping"][0]
+            if "special_tokens_mask" in enc:
+                enc["special_tokens_mask"] = enc["special_tokens_mask"][0]
+            if "length" in enc:
+                enc["length"] = enc["length"][0]
 
         return BatchEncoding(enc, tensor_type=return_tensors)
 
