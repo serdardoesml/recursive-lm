@@ -106,12 +106,16 @@ def batch_iterator(
     token_col: str = "tokens",
     drop_last: bool = True,
     device="cuda",
+    fix_length = True # If this is false, batches will be variable length
 ):
-    """Yield packed (micro)batches with fixed token budget.
+    """Yield packed (micro)batches with token budget `tokens_per_batch`.
 
     We stream doc-segments (each <= T+1 tokens raw, so <= T after shift) and pack
     them until the sum of training positions (len(chunk)-1) reaches
     tokens_per_batch.
+
+    If `fix_length` is True, chunks may be split to exactly fit the token budget.
+    If `fix_length` is False, chunks are never split and batch lengths may vary.
 
     Yields the output of pack_batch(buf).
     """
@@ -126,10 +130,12 @@ def batch_iterator(
         if seglen <= 0:
             continue
 
-        # If adding this would exceed budget, split the chunk to exactly fill.
+        # If adding this would exceed budget:
+        # - fix_length=True: split the current chunk to exactly fill.
+        # - fix_length=False: flush current batch and keep chunk intact.
         if buf and tok + seglen > tokens_per_batch:
             remaining = tokens_per_batch - tok
-            if remaining > 0:
+            if fix_length and remaining > 0:
                 # Split within the same chunk; overlap by one token to preserve last target.
                 head = chunk[: remaining + 1]
                 tail = chunk[remaining:]

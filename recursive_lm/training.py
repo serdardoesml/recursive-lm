@@ -30,6 +30,7 @@ class TrainingConfig:
     microbatch_tok: int = 32768
     grad_acc: int = 2
     sequence_len: int = 256 # Only for training, does not change model itself.
+    fix_length: bool = True # Allows for better compilation and faster training, reduces sample efficiency. Turn off for BabyLM scale.
 
     # TODO: Add feature so max_tok_count is optional and by default determined from full dataset size.
 
@@ -70,7 +71,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         routers += list(model.rec_blocks.routers)
 
     if train_config.torch_compile != "false":
-        compile_kwargs = {} # After fixing token shape, setting dynamic to either true or false makes performance worse, as it's mostly static except for cu_seqlens
+        compile_kwargs = {} # With fixed token shape, setting dynamic to either true or false makes performance worse, as it's mostly static except for cu_seqlens
+        if not train_config.fix_length:
+            compile_kwargs["dynamic"] = True
         if train_config.torch_compile == "max-autotune":
             compile_kwargs["mode"] = "max-autotune-no-cudagraphs"
         model = torch.compile(model, **compile_kwargs)
