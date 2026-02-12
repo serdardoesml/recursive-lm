@@ -12,7 +12,7 @@ class ModelConfig:
     n_head: int = 16 # Number of attention heads (16 seems ideal, 8 can be better for standard model)
     n_hidden: int = 384
     n_wembed: int = 128 # Allows for factorized embeddings, only makes sense at babylm scale.
-    moe: bool = False
+    moe: bool = False # Free lunch when flop constrained and not data constrained
     n_expert: int = 4
     top_k: int = 2
     n_mlp_intermediate: int = 1536
