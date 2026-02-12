@@ -30,7 +30,10 @@ class TrainingConfig:
     microbatch_tok: int = 32768
     grad_acc: int = 2
     sequence_len: int = 256 # Only for training, does not change model itself.
-    fix_length: bool = True # Allows for better compilation and faster training, reduces sample efficiency. Turn off for BabyLM scale.
+
+    # Allows for better compilation and faster training, reduces sample efficiency.
+    # I'm keeping it turned off as it hurts performance quite a bit on BabyLM scale, probably not optimal for higher scales too.
+    fix_length: bool = False 
 
     # TODO: Add feature so max_tok_count is optional and by default determined from full dataset size.
 
