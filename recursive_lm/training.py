@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from .optimizer import SingleDeviceNorMuonWithAuxAdam
 from .model import RecursiveGPT, ModelConfig
-from .dataloader import batch_iterator
+from .dataloader import batch_iterator, count_dataset_tokens
 from .common import get_base_dir
 
 from dataclasses import dataclass, asdict
@@ -31,15 +31,7 @@ class TrainingConfig:
     grad_acc: int = 2
     sequence_len: int = 256 # Only for training, does not change model itself.
 
-    # Allows for better compilation and faster training, reduces sample efficiency.
-    # I'm keeping it turned off as it hurts performance quite a bit on BabyLM scale, probably not optimal for higher scales too.
-    # NOTE: I accidentally discovered the performance change is more related to the torch compile mode. This seems to be a bug in torch 2.10, further investigation required.
-    fix_length: bool = False 
-
-    # TODO: Add feature so max_tok_count is optional and by default determined from full dataset size.
-
-    # 130.3M default max tok count, 4000 microbatches, 2000 updates per epoch
-    max_tok_count: int = 130300589 # Update when changing dataset or tokenizer
+    max_tok_count: int = 0 # Set to 0 to use entire dataset
     epoch: int = 10 # 10 epochs by default
     warmup_steps: int = 50
     cooldown_steps: int = 400
@@ -99,10 +91,13 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     if missing:
         print(f"Warning: {len(missing)} params not in optimizer: {', '.join(missing)}")
 
-    total_steps = int(
-        (train_config.max_tok_count * train_config.epoch)
-        / (train_config.microbatch_tok * train_config.grad_acc)
-    )
+    # Calculate token and step count
+    dataset_tok_count = count_dataset_tokens(parquet_path)
+    epoch_tok_count = dataset_tok_count if train_config.max_tok_count <= 0 else min(train_config.max_tok_count, dataset_tok_count)
+    microbatches_per_epoch = math.ceil(epoch_tok_count / train_config.microbatch_tok)
+    if epoch_tok_count % train_config.microbatch_tok != 0:
+        microbatches_per_epoch -= 1 # Due to drop_last in dataloader
+    total_steps = int((microbatches_per_epoch * train_config.epoch) / train_config.grad_acc)
     if train_config.profile:
         total_steps = min(total_steps, 10)
 
@@ -166,7 +161,6 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 parquet_path,
                 tokens_per_batch=train_config.microbatch_tok,
                 max_sl=train_config.sequence_len,
-                fix_length=train_config.fix_length,
                 device=device
             ):
                 # Cast to bf16 for fast training with A100 and H100s .

@@ -27,7 +27,6 @@ parser.add_argument("--run_name", type=str, default=TrainingConfig.run_name)
 parser.add_argument("--grad_clip", type=str, choices=["true", "false"], default=TrainingConfig.grad_clip)
 parser.add_argument("--max_grad_norm", type=float, default=TrainingConfig.max_grad_norm)
 parser.add_argument("--sequence_len", type=int, default=TrainingConfig.sequence_len)
-parser.add_argument("--fix_length", type=str, choices=["true", "false"], default=TrainingConfig.fix_length)
 
 parser.add_argument("--vocab_size", type=int, default=ModelConfig.vocab_size)
 parser.add_argument("--n_head", type=int, default=ModelConfig.n_head)
@@ -79,7 +78,6 @@ train_config = TrainingConfig(
     microbatch_tok=args.microbatch_tok,
     grad_acc=args.grad_acc,
     sequence_len=args.sequence_len,
-    fix_length=args.fix_length == "true",
     max_tok_count=args.max_tok_count,
     epoch=args.epoch,
     warmup_steps=args.warmup_steps,

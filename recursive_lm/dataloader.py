@@ -49,6 +49,20 @@ def parquet_doc_segments(parquet_path, token_col="tokens", T=512):
                     yield chunk
 
 
+def count_dataset_tokens(parquet_path, token_col="tokens"):
+    """Count total training tokens (next-token targets) in a parquet dataset."""
+    pf = pq.ParquetFile(parquet_path)
+    total_tokens = 0
+    for rg_idx in range(pf.num_row_groups):
+        rb = pf.read_row_group(rg_idx, columns=[token_col])
+        col = rb.column(0)
+        for row in col:
+            toks = row.as_py()
+            if toks and len(toks) >= 2:
+                total_tokens += len(toks) - 1
+    return total_tokens
+
+
 def pack_batch(segments, device):
     """Pack Python-list segments into a varlen-attn batch.
 
@@ -106,7 +120,7 @@ def batch_iterator(
     token_col: str = "tokens",
     drop_last: bool = True,
     device="cuda",
-    fix_length = True # If this is false, batches will be variable length
+    fix_length = True # Default True: no observed accuracy downside, and fixed-length batches allow us to compute exact step counts.
 ):
     """Yield packed (micro)batches with token budget `tokens_per_batch`.
 
