@@ -33,6 +33,7 @@ class TrainingConfig:
 
     # Allows for better compilation and faster training, reduces sample efficiency.
     # I'm keeping it turned off as it hurts performance quite a bit on BabyLM scale, probably not optimal for higher scales too.
+    # NOTE: I accidentally discovered the performance change is more related to the torch compile mode. This seems to be a bug in torch 2.10, further investigation required.
     fix_length: bool = False 
 
     # TODO: Add feature so max_tok_count is optional and by default determined from full dataset size.
@@ -74,9 +75,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         routers += list(model.rec_blocks.routers)
 
     if train_config.torch_compile != "false":
-        compile_kwargs = {} # With fixed token shape, setting dynamic to either true or false makes performance worse, as it's mostly static except for cu_seqlens
-        if not train_config.fix_length:
-            compile_kwargs["dynamic"] = True
+        # For some reason, even with fixed input length, removing dynamic=True leads to worse model eval accuracy.
+        # This could be a bug with torch 2.10.
+        compile_kwargs = {"dynamic": True} 
         if train_config.torch_compile == "max-autotune":
             compile_kwargs["mode"] = "max-autotune-no-cudagraphs"
         model = torch.compile(model, **compile_kwargs)
@@ -165,6 +166,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 parquet_path,
                 tokens_per_batch=train_config.microbatch_tok,
                 max_sl=train_config.sequence_len,
+                fix_length=train_config.fix_length,
                 device=device
             ):
                 # Cast to bf16 for fast training with A100 and H100s .
