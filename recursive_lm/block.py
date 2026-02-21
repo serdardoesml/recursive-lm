@@ -128,16 +128,16 @@ class MoE(nn.Module):
         return self.experts(x, topk_gates, topk_idx)
     
 class DenseMLP(nn.Module):
-    # Standard dense SwiGLU MLP with zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
+    # Standard dense ReLU^2 MLP with zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
     def __init__(self, config):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_hidden, 2 * config.n_mlp_intermediate, bias=False) # 2x for gating
+        self.c_fc = nn.Linear(config.n_hidden, config.n_mlp_intermediate, bias=False)
         self.c_proj = nn.Linear(config.n_mlp_intermediate, config.n_hidden, bias=False)
         nn.init.zeros_(self.c_proj.weight)
 
     def forward(self, x):
-        h, gates = self.c_fc(x).chunk(2, dim=-1)
-        return self.c_proj(F.silu(gates) * h)
+        h = F.relu(self.c_fc(x))
+        return self.c_proj(h.square())
     
 class Block(nn.Module):
     def __init__(self, config, cos_cache, sin_cache):

@@ -26,9 +26,8 @@ class TrainingConfig:
     wd_muon: float = 0.1
     lb_coef: float = 0.004
 
-    # Default target batch size: 65536 tok
     microbatch_tok: int = 32768
-    grad_acc: int = 2
+    grad_acc: int = 1 # There seems to be increasing evidence that accumulating gradients is never actually optimal. Keeping it for reproducability.
     sequence_len: int = 256 # Only for training, does not change model itself.
 
     max_tok_count: int = 0 # Set to 0 to use entire dataset
@@ -68,9 +67,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
 
     if train_config.torch_compile != "false":
         # For some reason, even with fixed input length, removing dynamic=True leads to worse model eval accuracy.
-        # This could be a bug with torch 2.10.
+        # This could be a bug with torch 2.10, or some weird hardware/cuda version specific thing.
         compile_kwargs = {"dynamic": True} 
-        if train_config.torch_compile == "max-autotune":
+        if train_config.torch_compile == "max-autotune": # Barely any benefit at small scales. Keeping it for potential future scaling.
             compile_kwargs["mode"] = "max-autotune-no-cudagraphs"
         model = torch.compile(model, **compile_kwargs)
 
