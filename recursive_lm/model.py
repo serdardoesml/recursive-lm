@@ -10,12 +10,12 @@ from dataclasses import dataclass
 class ModelConfig:
     vocab_size: int = 32768
     n_head: int = 16 # Number of attention heads (16 seems ideal, 8 can be better for standard model)
-    n_hidden: int = 384
+    n_hidden: int = 512
     n_wembed: int = 128 # Allows for factorized embeddings, only makes sense at babylm scale.
     moe: bool = False # Free lunch when flop constrained and not data constrained
-    n_expert: int = 4
-    top_k: int = 2
-    n_mlp_intermediate: int = 1536
+    n_expert: int = 1
+    top_k: int = 1
+    n_mlp_intermediate: int = 8192
     std_depth: int = 0
     rec_depth: int = 24
     tie_embed: bool = False # Tied embeddings greatly hurt performance on recursive mode

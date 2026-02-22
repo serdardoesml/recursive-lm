@@ -108,6 +108,7 @@ class MoE(nn.Module):
 
         # Modified to zero init output (Idea from modded-nanogpt speedrun, empirically seems to work well)
         # SwiGLU by default
+        # TODO: Change to Relu^2 to match dense mode
         self.experts = GLUMLP( 
             input_size=config.n_hidden,
             hidden_size=config.n_mlp_intermediate,
