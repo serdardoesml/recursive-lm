@@ -156,6 +156,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         f"epochs {train_config.epoch} | "
         f"total_steps {total_steps} | "
         f"torch_compile {train_config.torch_compile} | "
+        f"seed {train_config.seed} | "
         f"lr_embed {train_config.lr_embed:.6g} | "
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "
