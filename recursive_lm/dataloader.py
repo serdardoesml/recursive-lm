@@ -16,7 +16,7 @@ import torch
 from .common import get_base_dir
 
 
-def parquet_doc_segments(parquet_path, token_col="tokens", T=512):
+def parquet_doc_segments(parquet_path, token_col="tokens", T=512, seed=None):
     """
     Yields token segments (as plain python lists), each chunk is from ONE document only.
     Chunk length is in [2, T+1].
@@ -32,7 +32,9 @@ def parquet_doc_segments(parquet_path, token_col="tokens", T=512):
         return
 
     max_chunk_len = T + 1
-    row_group_perm = random.sample(range(pf.num_row_groups), pf.num_row_groups)
+    
+    rng = random.Random(seed)
+    row_group_perm = rng.sample(range(pf.num_row_groups), pf.num_row_groups)
 
     for rg_idx in row_group_perm:
         rb = pf.read_row_group(rg_idx, columns=[token_col])
@@ -120,7 +122,8 @@ def batch_iterator(
     token_col: str = "tokens",
     drop_last: bool = True,
     device="cuda",
-    fix_length = True # Default True: no observed accuracy downside, and fixed-length batches allow us to compute exact step counts.
+    fix_length = True, # Default True: no observed accuracy downside, and fixed-length batches allow us to compute exact step counts.
+    seed=None,
 ):
     """Yield packed (micro)batches with token budget `tokens_per_batch`.
 
@@ -139,7 +142,7 @@ def batch_iterator(
     buf: list[list[int]] = []
     tok = 0  # sum of (len(chunk)-1) in buf
 
-    for chunk in parquet_doc_segments(parquet_path, token_col=token_col, T=max_sl):
+    for chunk in parquet_doc_segments(parquet_path, token_col=token_col, T=max_sl, seed=seed):
         seglen = len(chunk) - 1
         if seglen <= 0:
             continue

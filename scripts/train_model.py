@@ -7,6 +7,7 @@ from recursive_lm.training import TrainingConfig, train
 
 parser = argparse.ArgumentParser(description="Train RecursiveGPT")
 parser.add_argument("--dataset", type=str, required=True, help="Tokenized parquet filename under data/tokenized")
+parser.add_argument("--seed", type=int, default=TrainingConfig.seed) # Set negative for random
 
 parser.add_argument("--lr_embed", type=float, default=TrainingConfig.lr_embed)
 parser.add_argument("--lr_block", type=float, default=TrainingConfig.lr_block)
@@ -68,6 +69,7 @@ model_config = ModelConfig(
 
 train_config = TrainingConfig(
     model_config=model_config,
+    seed=args.seed,
     lr_embed=args.lr_embed,
     lr_block=args.lr_block,
     min_lr_embed=args.min_lr_embed,

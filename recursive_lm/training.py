@@ -15,11 +15,17 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 import math
 import os
+import random
 import time
 
 @dataclass
 class TrainingConfig:
     model_config: ModelConfig
+
+    # Set a negative value for random. Used for initialization and dataset shuffling.
+    # Note: For data shuffling, each epoch will use previous epoch seed + 1.
+    seed: int = -1
+
     lr_embed: float = 0.007
     lr_block: float = 0.02 # Muon requires higher learning rate.
     wd_adam: float = 0.005
@@ -51,6 +57,12 @@ class TrainingConfig:
     profile: bool = False
 
 def train(train_config: TrainingConfig, parquet_path, device, save=False):
+    if train_config.seed < 0: # Random seed if set negative
+        train_config.seed = random.randint(1, 2**31 - 1) 
+    torch.manual_seed(train_config.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(train_config.seed)
+
     if train_config.profile:
         save = False
     train_config.model_config.rope_cache_len = train_config.sequence_len # Avoids inefficiency as this gets passed into varlen_attn as max_seqlen, probably better way to handle this though
@@ -160,7 +172,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 parquet_path,
                 tokens_per_batch=train_config.microbatch_tok,
                 max_sl=train_config.sequence_len,
-                device=device
+                device=device,
+                seed=train_config.seed + epoch_idx,
             ):
                 # Cast to bf16 for fast training with A100 and H100s .
                 # Varlen-attn doesn't support anything else, so no need to change this really. 
