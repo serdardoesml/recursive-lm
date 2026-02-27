@@ -9,7 +9,7 @@ from dataclasses import dataclass
 @dataclass
 class ModelConfig:
     vocab_size: int = 32768
-    n_head: int = 16 # Number of attention heads (16 seems ideal, 8 can be better for standard model)
+    n_head: int = 8 # Number of attention heads (8 and 16 both work, surprisingly little impact, more exploration needed)
     n_hidden: int = 512
     n_wembed: int = 128 # Allows for factorized embeddings, only makes sense at babylm scale.
     moe: bool = False # Free lunch when flop constrained and not data constrained

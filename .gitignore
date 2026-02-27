@@ -11,4 +11,4 @@ analysis/*
 models/*
 evals/data/*
 evals/logs/*
-
+slurm/
