@@ -28,7 +28,7 @@ class TrainingConfig:
 
     lr_embed: float = 0.007
     lr_block: float = 0.02 # Muon requires higher learning rate.
-    wd_adam: float = 0.05
+    wd_adam: float = 0.005
     wd_muon: float = 0.1
     lb_coef: float = 0.004
 
