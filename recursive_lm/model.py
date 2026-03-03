@@ -25,6 +25,18 @@ class ModelConfig:
     def n_headdim(self) -> int:
         return self.n_hidden // self.n_head
     
+class RMSNormWithOptionalBias(nn.Module):
+    def __init__(self, normalized_shape, eps=1e-6, dtype=torch.bfloat16, use_bias=False):
+        super().__init__()
+        self.norm = nn.RMSNorm(normalized_shape, eps=eps, dtype=dtype)
+        self.bias = nn.Parameter(torch.zeros(normalized_shape, dtype=dtype)) if use_bias else None
+
+    def forward(self, x):
+        x = self.norm(x)
+        if self.bias is not None:
+            x = x + self.bias
+        return x
+    
 
 class StandardBlocks(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
@@ -33,9 +45,9 @@ class StandardBlocks(nn.Module):
         self.moe = config.moe
 
         # Independent norms for each depth
-        self.attn_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.mlp_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.qk_norms = nn.ModuleList([nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        self.attn_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_hidden, use_bias=True) for _ in range(self.depth)])
+        self.mlp_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_hidden, use_bias=True) for _ in range(self.depth)])
+        self.qk_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_headdim) for _ in range(self.depth)])
 
         if self.moe:
             # Independent routers for each depth
@@ -77,10 +89,11 @@ class RecursiveBlocks(nn.Module):
         self.depth = config.rec_depth
         self.moe = config.moe
 
-        # Independent norms for each depth
-        self.attn_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.mlp_norms = nn.ModuleList([nn.RMSNorm(config.n_hidden, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
-        self.qk_norms = nn.ModuleList([nn.RMSNorm(config.n_headdim, eps=1e-6, dtype=torch.bfloat16) for _ in range(self.depth)])
+        # Independent norms for each depth. Recursive blocks use post-norm bias
+        # on attn/mlp norms as depth-specific conditioning.
+        self.attn_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_hidden, use_bias=True) for _ in range(self.depth)])
+        self.mlp_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_hidden, use_bias=True) for _ in range(self.depth)])
+        self.qk_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_headdim) for _ in range(self.depth)])
 
         if self.moe:
             # Independent routers for each depth
@@ -92,16 +105,8 @@ class RecursiveBlocks(nn.Module):
 
         self.recursive_block = Block(config, cos_cache, sin_cache)
 
-        # Per layer embeddings
-        # TODO: Explain the idea in more detail and find a new name. 
-        # We initialize at zero to let model start without any depth specific information and learn it gradually.
-        # Bf16, shouldnt hurt stability, prevents casting issues
-        self.rec_layer_embedding = nn.Embedding(self.depth, config.n_hidden, dtype=torch.bfloat16) 
-        nn.init.zeros_(self.rec_layer_embedding.weight) 
-
     def forward(self, x, cu_seqlens, max_seqlen, position_ids):
         for i in range(self.depth):
-            x = x + self.rec_layer_embedding.weight[i]
             if self.moe:
                 x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i], self.routers[i])
             else:
