@@ -45,6 +45,7 @@ def main() -> int:
     parser.add_argument("--tokenizer", required=True, help="Tokenizer filename under tokenizers/")
     parser.add_argument("--device", default=None, help="Device (e.g. cuda, cuda:0, cpu).")
     parser.add_argument("--max-batch-tokens", type=int, default=8192, help="Max tokens per eval batch (0 to disable).")
+    parser.add_argument("--lite", action="store_true", help="Run only the lite subset: lambada_openai and hellaswag_zeroshot.")
     args = parser.parse_args()
 
     base_dir = get_base_dir()
@@ -67,6 +68,12 @@ def main() -> int:
     if not tasks:
         print("Error: core.yaml has no tasks.", file=sys.stderr)
         return 1
+    if args.lite:
+        lite_labels = {"lambada_openai", "hellaswag_zeroshot"}
+        tasks = [task for task in tasks if task.get("label") in lite_labels]
+        if not tasks:
+            print("Error: lite task subset is empty.", file=sys.stderr)
+            return 1
 
     device = args.device
     if device is None:
@@ -144,7 +151,8 @@ def main() -> int:
     log_dir = base_dir / "evals" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d-%H%M%S")
-    log_path = log_dir / f"core_eval_{Path(args.model).stem}_{ts}.json"
+    log_prefix = "core_eval_lite" if args.lite else "core_eval"
+    log_path = log_dir / f"{log_prefix}_{Path(args.model).stem}_{ts}.json"
     payload = {
         "model": args.model,
         "tokenizer": args.tokenizer,
