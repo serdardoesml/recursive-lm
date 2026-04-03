@@ -196,6 +196,7 @@ def _prepare_example(idx, model, tokenizer, data, task_meta):
     return {
         "task_type": task_type,
         "gold": item.get("gold", None),
+        "lm_pass_at_k": int(task_meta.get("lm_pass_at_k", 1)),
         "sequences": sequences,
     }
 
@@ -223,6 +224,7 @@ def _evaluate_batch(prepared_examples, model, device):
                 "start": seq["start"],
                 "end": seq["end"],
                 "task_type": prep["task_type"],
+                "lm_pass_at_k": prep.get("lm_pass_at_k", 1),
             })
 
     flat_input, cu_seqlens, position_ids, _lengths, offsets = pack_varlen(sequences, device=device)
@@ -237,16 +239,22 @@ def _evaluate_batch(prepared_examples, model, device):
     targets_t = torch.tensor(targets, dtype=torch.long, device=flat_input.device)
 
     losses = F.cross_entropy(logits, targets_t, reduction="none", ignore_index=-100)
-    predictions = logits.argmax(dim=-1)
 
     for i, meta in enumerate(seq_meta):
         off = offsets[i]
         si = meta["start"]
         ei = meta["end"]
         if meta["task_type"] == "language_modeling":
-            predicted_tokens = predictions[off + si - 1 : off + ei - 1]
+            span_logits = logits[off + si - 1 : off + ei - 1]
             actual_tokens = flat_input[off + si : off + ei]
-            correct = torch.all(predicted_tokens == actual_tokens).item()
+            lm_pass_at_k = int(meta.get("lm_pass_at_k", 1))
+            if lm_pass_at_k <= 1:
+                predicted_tokens = span_logits.argmax(dim=-1)
+                correct = torch.all(predicted_tokens == actual_tokens).item()
+            else:
+                k = min(lm_pass_at_k, span_logits.size(-1))
+                topk_tokens = span_logits.topk(k=k, dim=-1).indices
+                correct = torch.all(topk_tokens.eq(actual_tokens.unsqueeze(-1)).any(dim=-1)).item()
             example_info[meta["ex_idx"]]["scores"][meta["choice_idx"]] = float(correct)
         else:
             span = losses[off + si - 1 : off + ei - 1]
@@ -269,8 +277,6 @@ def evaluate_example(idx, model, tokenizer, data, device, task_meta):
     prep = _prepare_example(idx, model, tokenizer, data, task_meta)
     out = _evaluate_batch([(idx, prep)], model, device)
     return out[idx]
-
-    return is_correct
 
 
 def evaluate_task(

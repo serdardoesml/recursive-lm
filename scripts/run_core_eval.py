@@ -46,6 +46,8 @@ def main() -> int:
     parser.add_argument("--device", default=None, help="Device (e.g. cuda, cuda:0, cpu).")
     parser.add_argument("--max-batch-tokens", type=int, default=8192, help="Max tokens per eval batch (0 to disable).")
     parser.add_argument("--lite", action="store_true", help="Run only the lite subset: lambada_openai and hellaswag_zeroshot.")
+    parser.add_argument("--task", default=None, help="Run only a single CORE task label, e.g. lambada_openai.")
+    parser.add_argument("--pass-at-k", type=int, default=1, help="For language_modeling tasks, treat a token as correct if it is in the top-k predictions.")
     args = parser.parse_args()
 
     base_dir = get_base_dir()
@@ -74,6 +76,14 @@ def main() -> int:
         if not tasks:
             print("Error: lite task subset is empty.", file=sys.stderr)
             return 1
+    if args.task:
+        tasks = [task for task in tasks if task.get("label") == args.task]
+        if not tasks:
+            print(f"Error: task {args.task!r} not found in core.yaml.", file=sys.stderr)
+            return 1
+    if args.pass_at_k < 1:
+        print("Error: --pass-at-k must be >= 1.", file=sys.stderr)
+        return 1
 
     device = args.device
     if device is None:
@@ -107,16 +117,21 @@ def main() -> int:
 
     results = {}
     centered_results = {}
+    task_metrics = {}
 
     autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16) if "cuda" in str(device) else torch.no_grad()
     with autocast_ctx:
         for task in tasks:
             label = task["label"]
+            task_type = task["icl_task_type"]
+            task_pass_at_k = args.pass_at_k if task_type == "language_modeling" else 1
+            task_metric_name = "acc" if task_pass_at_k == 1 else f"pass@{task_pass_at_k}"
             task_meta = {
-                "task_type": task["icl_task_type"],
+                "task_type": task_type,
                 "dataset_uri": task["dataset_uri"],
                 "num_fewshot": task["num_fewshot"][0] if isinstance(task["num_fewshot"], list) else task["num_fewshot"],
                 "continuation_delimiter": task.get("continuation_delimiter", " "),
+                "lm_pass_at_k": task_pass_at_k,
             }
             data_path = data_base / task_meta["dataset_uri"]
             if not data_path.exists():
@@ -136,14 +151,15 @@ def main() -> int:
             )
             elapsed = time.time() - start
             results[label] = accuracy
+            task_metrics[label] = task_metric_name
 
-            if label in random_baselines:
+            if task_pass_at_k == 1 and label in random_baselines:
                 baseline = random_baselines[label]
                 centered = (accuracy - 0.01 * baseline) / (1.0 - 0.01 * baseline)
                 centered_results[label] = centered
-                print(f"{label}: acc {accuracy:.4f} | centered {centered:.4f} | {elapsed:.2f}s")
+                print(f"{label}: {task_metric_name} {accuracy:.4f} | centered {centered:.4f} | {elapsed:.2f}s")
             else:
-                print(f"{label}: acc {accuracy:.4f} | {elapsed:.2f}s")
+                print(f"{label}: {task_metric_name} {accuracy:.4f} | {elapsed:.2f}s")
 
     mean_acc = sum(results.values()) / len(results) if results else 0.0
     core_metric = sum(centered_results.values()) / len(centered_results) if centered_results else None
@@ -157,8 +173,12 @@ def main() -> int:
         "model": args.model,
         "tokenizer": args.tokenizer,
         "device": device,
+        "requested_pass_at_k": args.pass_at_k,
+        "task": args.task,
+        "task_metrics": task_metrics,
         "results": results,
         "centered_results": centered_results,
+        "mean_score": mean_acc,
         "mean_accuracy": mean_acc,
         "core_metric": core_metric,
         "timestamp": ts,
