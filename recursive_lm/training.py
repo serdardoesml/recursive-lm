@@ -6,6 +6,7 @@ Note: At some point i tried prefetching the batch iterator, does not improve tot
 
 import torch
 import torch.nn.functional as F
+from torch.utils.flop_counter import FlopCounterMode
 from .optimizer import SingleDeviceNorMuonWithAuxAdam
 from .model import RecursiveGPT, ModelConfig
 from .dataloader import batch_iterator, count_dataset_tokens
@@ -139,6 +140,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
 
     profiler = None
     profiler_started = False
+    flop_counter = FlopCounterMode(display=False)
     if train_config.profile:
         print("Warning: Profiling mode enabled!")
         import torch.profiler as profiler_mod
@@ -167,75 +169,76 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     )
 
     try:
-        for epoch_idx in range(train_config.epoch):
-            # Batch iterator re-initializes at each epoch with a different random shuffle
-            for input_ids, targets, cu_seqlens, position_ids in batch_iterator(
-                parquet_path,
-                tokens_per_batch=train_config.microbatch_tok,
-                max_sl=train_config.sequence_len,
-                device=device,
-                seed=train_config.seed + epoch_idx,
-            ):
-                # Cast to bf16 for fast training with A100 and H100s .
-                # Varlen-attn doesn't support anything else, so no need to change this really. 
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                    logits = model(input_ids, cu_seqlens, position_ids)
-                    loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        with flop_counter:
+            for epoch_idx in range(train_config.epoch):
+                # Batch iterator re-initializes at each epoch with a different random shuffle
+                for input_ids, targets, cu_seqlens, position_ids in batch_iterator(
+                    parquet_path,
+                    tokens_per_batch=train_config.microbatch_tok,
+                    max_sl=train_config.sequence_len,
+                    device=device,
+                    seed=train_config.seed + epoch_idx,
+                ):
+                    # Cast to bf16 for fast training with A100 and H100s .
+                    # Varlen-attn doesn't support anything else, so no need to change this really. 
+                    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                        logits = model(input_ids, cu_seqlens, position_ids)
+                        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
-                    # SimBal load balancing loss (https://arxiv.org/pdf/2506.14038v2)
-                    # Modified to normalize router weights with l2 norm before calculating
-                    lb_loss = logits.new_tensor(0.0)
-                    for router in routers:
-                        W = router.weight.float()  # [E, D]
-                        W = F.normalize(W, p=2, dim=1)
-                        G = W @ W.t()  # [E, E]
-                        I = torch.eye(G.shape[0], device=G.device, dtype=G.dtype)
-                        lb_loss = lb_loss + torch.norm(G - I, p=1)
-                    total_loss = loss + train_config.lb_coef * lb_loss
+                        # SimBal load balancing loss (https://arxiv.org/pdf/2506.14038v2)
+                        # Modified to normalize router weights with l2 norm before calculating
+                        lb_loss = logits.new_tensor(0.0)
+                        for router in routers:
+                            W = router.weight.float()  # [E, D]
+                            W = F.normalize(W, p=2, dim=1)
+                            G = W @ W.t()  # [E, E]
+                            I = torch.eye(G.shape[0], device=G.device, dtype=G.dtype)
+                            lb_loss = lb_loss + torch.norm(G - I, p=1)
+                        total_loss = loss + train_config.lb_coef * lb_loss
 
-                # Accumulate gradients
-                loss_float = float(loss.detach())
-                lb_loss_float = float(lb_loss.detach())
-                accum_loss += loss_float
-                accum_lb_loss += lb_loss_float
-                (total_loss / train_config.grad_acc).backward()
-                micro_step += 1
+                    # Accumulate gradients
+                    loss_float = float(loss.detach())
+                    lb_loss_float = float(lb_loss.detach())
+                    accum_loss += loss_float
+                    accum_lb_loss += lb_loss_float
+                    (total_loss / train_config.grad_acc).backward()
+                    micro_step += 1
 
-                if micro_step % train_config.grad_acc == 0:
-                    # Optimizer Step
-                    if train_config.grad_clip:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.max_grad_norm)
-                    opt.step()
-                    scheduler.step()
-                    step += 1
+                    if micro_step % train_config.grad_acc == 0:
+                        # Optimizer Step
+                        if train_config.grad_clip:
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.max_grad_norm)
+                        opt.step()
+                        scheduler.step()
+                        step += 1
 
-                    # Metrics and logging
-                    if step == 1:
-                        now = time.time()
-                        first_step_time = now - start_time
-                        if train_config.torch_compile != "false":
-                            print(f"Compile time: {first_step_time:.2f}s")
+                        # Metrics and logging
+                        if step == 1:
+                            now = time.time()
+                            first_step_time = now - start_time
+                            if train_config.torch_compile != "false":
+                                print(f"Compile time: {first_step_time:.2f}s")
+                            else:
+                                print(f"First step time: {first_step_time:.2f}s")
+                            start_time = now
+                            last_step_time = now
+                            if profiler is not None and not profiler_started:
+                                profiler.__enter__()
+                                profiler_started = True
                         else:
-                            print(f"First step time: {first_step_time:.2f}s")
-                        start_time = now
-                        last_step_time = now
-                        if profiler is not None and not profiler_started:
-                            profiler.__enter__()
-                            profiler_started = True
-                    else:
-                        now = time.time()
-                        last_step_time = report_step(now, epoch_idx, step, total_steps, accum_loss, accum_lb_loss, train_config, scheduler, last_step_time, start_time, wandb_run)
+                            now = time.time()
+                            last_step_time = report_step(now, epoch_idx, step, total_steps, accum_loss, accum_lb_loss, train_config, scheduler, last_step_time, start_time, wandb_run)
 
-                        if profiler_started:
-                            profiler.step()
+                            if profiler_started:
+                                profiler.step()
 
-                    if step >= total_steps:
-                        break
-                    opt.zero_grad(set_to_none=True)
-                    accum_loss = 0.0
-                    accum_lb_loss = 0.0
-            if step >= total_steps:
-                break
+                        if step >= total_steps:
+                            break
+                        opt.zero_grad(set_to_none=True)
+                        accum_loss = 0.0
+                        accum_lb_loss = 0.0
+                if step >= total_steps:
+                    break
     finally:
         if profiler_started:
             profiler.__exit__(None, None, None)
@@ -247,6 +250,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 )
             )
 
+    print(f"Total FLOPs: {flop_counter.get_total_flops():,}")
     if save:
         save_model(model, train_config.run_name) 
     if wandb_run is not None:
