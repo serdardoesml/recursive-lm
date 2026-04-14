@@ -1,6 +1,8 @@
 import argparse
 import math
 import os
+import random
+from bisect import bisect_left
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -15,47 +17,67 @@ def resolve_dataset_path(dataset: str) -> str:
     return os.path.join(get_base_dir(), "data", "tokenized", dataset)
 
 
-def prefix_batch(batch, tokens_to_keep: int):
-    # Keep exactly the requested token-prefix from this batch, truncating only the last row if needed.
-    length_idx = batch.schema.get_field_index("length")
-    token_idx = batch.schema.get_field_index("tokens")
-    lengths = batch.column(length_idx).to_pylist()
+def prefix_table(table: pa.Table, lengths: list[int], tokens_to_keep: int) -> pa.Table:
+    # Keep exactly the requested token-prefix, truncating only the final row if needed.
+    cumulative = []
+    running = 0
+    for length in lengths:
+        running += length
+        cumulative.append(running)
 
-    kept_tokens = []
-    kept_lengths = []
-    kept_total = 0
+    # Find the first row whose inclusion would meet or exceed the token budget.
+    stop_idx = bisect_left(cumulative, tokens_to_keep)
+    if stop_idx >= len(lengths):
+        return table
 
-    for row_idx, length in enumerate(lengths):
-        if kept_total + length <= tokens_to_keep:
-            kept_tokens.append(batch.column(token_idx)[row_idx].as_py())
-            kept_lengths.append(length)
-            kept_total += length
-            continue
+    prefix = table.slice(0, stop_idx + 1)
+    if cumulative[stop_idx] == tokens_to_keep:
+        return prefix
 
-        remaining = tokens_to_keep - kept_total
-        if remaining > 0:
-            kept_tokens.append(batch.column(token_idx)[row_idx].as_py()[:remaining])
-            kept_lengths.append(remaining)
-            kept_total += remaining
-        break
+    remaining = tokens_to_keep - (cumulative[stop_idx - 1] if stop_idx > 0 else 0)
+    length_idx = prefix.schema.get_field_index("length")
+    token_idx = prefix.schema.get_field_index("tokens")
 
-    return pa.record_batch(
-        [pa.array(kept_tokens), pa.array(kept_lengths)],
-        names=["tokens", "length"],
+    prefix_lengths = prefix.column(length_idx).to_pylist()
+    prefix_tokens = prefix.column(token_idx).to_pylist()
+    prefix_lengths[-1] = remaining
+    prefix_tokens[-1] = prefix_tokens[-1][:remaining]
+
+    prefix = prefix.set_column(
+        length_idx,
+        prefix.schema.field(length_idx),
+        pa.array(prefix_lengths, type=prefix.schema.field(length_idx).type),
     )
+    prefix = prefix.set_column(
+        token_idx,
+        prefix.schema.field(token_idx),
+        pa.array(prefix_tokens, type=prefix.schema.field(token_idx).type),
+    )
+    return prefix
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", type=str, required=True, help="Tokenized parquet file or filename under data/tokenized")
+parser.add_argument("--seed", type=int, default=0, help="Seed used to shuffle document order before subdivision")
 args = parser.parse_args()
 
 input_path = resolve_dataset_path(args.dataset)
-pf = pq.ParquetFile(input_path)
+table = pq.read_table(input_path)
+if table.num_rows == 0:
+    raise ValueError(f"No rows found in {input_path}")
 
-total_tokens = 0
-# Count total tokens first so the subset cutoffs are absolute.
-for batch in pf.iter_batches(columns=["length"]):
-    total_tokens += sum(batch.column(0).to_pylist())
+# Shuffle document order once up front so each output is a random prefix of rows.
+rng = random.Random(args.seed)
+permutation = list(range(table.num_rows))
+rng.shuffle(permutation)
+shuffled_table = table.take(pa.array(permutation, type=pa.int64()))
+
+length_idx = shuffled_table.schema.get_field_index("length")
+if length_idx == -1:
+    raise ValueError(f"Dataset {input_path} is missing required 'length' column")
+
+lengths = shuffled_table.column(length_idx).to_pylist()
+total_tokens = sum(lengths)
 
 if total_tokens == 0:
     raise ValueError(f"No tokens found in {input_path}")
@@ -64,40 +86,9 @@ fractions = [("10pct", 0.10), ("25pct", 0.25), ("50pct", 0.50)]
 targets = [(name, min(total_tokens, math.ceil(total_tokens * fraction))) for name, fraction in fractions]
 
 stem, _ = os.path.splitext(input_path)
-writers = {
-    name: pq.ParquetWriter(f"{stem}_{name}.parquet", pf.schema_arrow)
-    for name, _ in targets
-}
-written_tokens = {name: 0 for name, _ in targets}
-finished = set()
-seen_tokens = 0
-
-try:
-    for batch in pf.iter_batches():
-        lengths = batch.column(batch.schema.get_field_index("length")).to_pylist()
-        batch_tokens = sum(lengths)
-
-        for name, target in targets:
-            if name in finished:
-                continue
-
-            if seen_tokens + batch_tokens <= target:
-                writers[name].write_batch(batch)
-                written_tokens[name] += batch_tokens
-                continue
-
-            # This batch crosses the cutoff, so write only the needed prefix.
-            partial = prefix_batch(batch, target - seen_tokens)
-            writers[name].write_batch(partial)
-            written_tokens[name] = target
-            finished.add(name)
-
-        seen_tokens += batch_tokens
-        if len(finished) == len(targets):
-            break
-finally:
-    for writer in writers.values():
-        writer.close()
-
-for name, _ in targets:
-    print(f"{stem}_{name}.parquet: {written_tokens[name]} tokens")
+for name, target in targets:
+    # Reuse the same shuffled order for all subsets so 10% is contained in 25%, etc.
+    subset = prefix_table(shuffled_table, lengths, target)
+    output_path = f"{stem}_{name}.parquet"
+    pq.write_table(subset, output_path)
+    print(f"{output_path}: {target} tokens")
