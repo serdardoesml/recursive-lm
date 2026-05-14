@@ -99,7 +99,7 @@ def pack_batch(segments, device):
     # CUDA supports memory pinning for asynchronous transfers between CPU and GPU
     # I have absolutely no idea if doing it this way is any faster than creating the tensor on GPU directly
     # It probably does not matter much, and i spent way too much time on it, so i am leaving it as it is
-    use_cuda_optimizations = device == "cuda"
+    use_cuda_optimizations = str(device).startswith("cuda")
     input_ids_t = torch.tensor(input_ids, dtype=torch.long, pin_memory=use_cuda_optimizations, device="cpu")
     targets_t = torch.tensor(targets, dtype=torch.long, pin_memory=use_cuda_optimizations, device="cpu")
     cu_seqlens_t = torch.tensor(cu, dtype=torch.int32, pin_memory=use_cuda_optimizations, device="cpu")
@@ -124,6 +124,8 @@ def batch_iterator(
     device="cuda",
     fix_length = True, # Default True: no observed accuracy downside, and fixed-length batches allow us to compute exact step counts.
     seed=None,
+    rank: int = 0,
+    world_size: int = 1,
 ):
     """Yield packed (micro)batches with token budget `tokens_per_batch`.
 
@@ -135,12 +137,16 @@ def batch_iterator(
     If `fix_length` is False, chunks are never split and batch lengths may vary.
 
     Yields the output of pack_batch(buf).
+
+    If world_size is more than 1, each rank yields its own strided subset of batches. 
+    Simple and deterministic way to support multi-gpu.
     """
 
     assert max_sl <= tokens_per_batch
 
     buf: list[list[int]] = []
     tok = 0  # sum of (len(chunk)-1) in buf
+    batch_idx = 0
 
     for chunk in parquet_doc_segments(parquet_path, token_col=token_col, T=max_sl, seed=seed):
         seglen = len(chunk) - 1
@@ -158,13 +164,17 @@ def batch_iterator(
                 tail = chunk[remaining:]
                 buf.append(head)
                 tok += remaining
-                yield pack_batch(buf, device=device)
+                if batch_idx % world_size == rank:
+                    yield pack_batch(buf, device=device)
+                batch_idx += 1
                 buf.clear()
                 tok = 0
                 chunk = tail
                 seglen = len(chunk) - 1
             else:
-                yield pack_batch(buf, device=device)
+                if batch_idx % world_size == rank:
+                    yield pack_batch(buf, device=device)
+                batch_idx += 1
                 buf.clear()
                 tok = 0
 
@@ -172,7 +182,8 @@ def batch_iterator(
         tok += seglen
 
     if buf and not drop_last:
-        yield pack_batch(buf, device=device)
+        if batch_idx % world_size == rank:
+            yield pack_batch(buf, device=device)
 
 
 # DEBUG

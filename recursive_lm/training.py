@@ -5,15 +5,15 @@ Note: At some point i tried prefetching the batch iterator, does not improve tot
 """
 
 import torch
+from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.nn.functional as F
 from .optimizer import SingleDeviceNorMuonWithAuxAdam
 from .model import RecursiveGPT, ModelConfig
 from .dataloader import batch_iterator, count_dataset_tokens
-from .common import get_base_dir
+from .common import get_base_dir, print0
 
 from dataclasses import dataclass, asdict
 from datetime import datetime
-import math
 import os
 import random
 import time
@@ -56,7 +56,7 @@ class TrainingConfig:
     # Limits step count to 10 and disables saving.
     profile: bool = False
 
-def train(train_config: TrainingConfig, parquet_path, device, save=False):
+def train(train_config: TrainingConfig, parquet_path, device, save=False, ddp=False, rank=0, local_rank=0, world_size=1):
     if train_config.seed < 0: # Random seed if set negative
         train_config.seed = random.randint(1, 2**31 - 1) 
     torch.manual_seed(train_config.seed)
@@ -69,13 +69,14 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     model = RecursiveGPT(
         train_config.model_config,
     ).to(device) # Init model and move to device
+    raw_model = model
 
     # Keep track of routers for lb loss
     routers = []
-    if hasattr(model, "std_blocks") and hasattr(model.std_blocks, "routers"):
-        routers += list(model.std_blocks.routers)
-    if hasattr(model, "rec_blocks") and hasattr(model.rec_blocks, "routers"):
-        routers += list(model.rec_blocks.routers)
+    if hasattr(raw_model, "std_blocks") and hasattr(raw_model.std_blocks, "routers"):
+        routers += list(raw_model.std_blocks.routers)
+    if hasattr(raw_model, "rec_blocks") and hasattr(raw_model.rec_blocks, "routers"):
+        routers += list(raw_model.rec_blocks.routers)
 
     if train_config.torch_compile != "false":
         # For some reason, even with fixed input length, removing dynamic=True leads to worse model eval accuracy.
@@ -85,29 +86,31 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             compile_kwargs["mode"] = "max-autotune-no-cudagraphs"
         model = torch.compile(model, **compile_kwargs)
 
+    if ddp:
+        model = DDP(model, device_ids=[local_rank])
+
     # We split params so only block params use Muon,
     # and everything else (embeddings and norms) uses AdamW.
     opt = SingleDeviceNorMuonWithAuxAdam(
         [
-            {"params": model.adam_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
-            {"params": model.muon_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": train_config.wd_muon},
+            {"params": raw_model.adam_params, "lr": train_config.lr_embed, "use_muon": False, "weight_decay": train_config.wd_adam},
+            {"params": raw_model.muon_params, "lr": train_config.lr_block, "use_muon": True, "weight_decay": train_config.wd_muon},
         ]
     ) # NorMuon optimizer with CWD (References in optimizer.py)
 
     # Warn if any trainable params are missing from optimizer groups.
     # I wasted a lot of time forgetting to add params to the lr groups, hopefully this prevents that lol.
-    param_names = {id(p): name for name, p in model.named_parameters()}
+    param_names = {id(p): name for name, p in raw_model.named_parameters()}
     opt_param_ids = {id(p) for group in opt.param_groups for p in group["params"]}
-    missing = [param_names[id(p)] for p in model.parameters() if id(p) not in opt_param_ids]
+    missing = [param_names[id(p)] for p in raw_model.parameters() if id(p) not in opt_param_ids]
     if missing:
-        print(f"Warning: {len(missing)} params not in optimizer: {', '.join(missing)}")
+        print0(f"Warning: {len(missing)} params not in optimizer: {', '.join(missing)}", rank=rank)
 
     # Calculate token and step count
     dataset_tok_count = count_dataset_tokens(parquet_path)
     epoch_tok_count = dataset_tok_count if train_config.max_tok_count <= 0 else min(train_config.max_tok_count, dataset_tok_count)
-    microbatches_per_epoch = math.ceil(epoch_tok_count / train_config.microbatch_tok)
-    if epoch_tok_count % train_config.microbatch_tok != 0:
-        microbatches_per_epoch -= 1 # Due to drop_last in dataloader
+    global_microbatch_tok = train_config.microbatch_tok * world_size
+    microbatches_per_epoch = epoch_tok_count // global_microbatch_tok
     total_steps = int((microbatches_per_epoch * train_config.epoch) / train_config.grad_acc)
     if train_config.profile:
         total_steps = min(total_steps, 10)
@@ -128,7 +131,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         min_lrs=[train_config.min_lr_embed, train_config.min_lr_block],
     )
     wandb_run = None
-    if train_config.use_wandb:
+    if train_config.use_wandb and rank == 0:
         import wandb
         wandb_run = wandb.init(
             project=train_config.wandb_project,
@@ -140,7 +143,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
     profiler = None
     profiler_started = False
     if train_config.profile:
-        print("Warning: Profiling mode enabled!")
+        print0("Warning: Profiling mode enabled!", rank=rank)
         import torch.profiler as profiler_mod
         activities = [profiler_mod.ProfilerActivity.CPU]
         if str(device).startswith("cuda") and torch.cuda.is_available():
@@ -151,23 +154,27 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
             profile_memory=True,
         )
 
-    print(
+    print0(
         "Training summary | "
         f"epochs {train_config.epoch} | "
         f"total_steps {total_steps} | "
+        f"world_size {world_size} | "
+        f"tokens_per_step {train_config.microbatch_tok * train_config.grad_acc * world_size} | "
         f"torch_compile {train_config.torch_compile} | "
         f"seed {train_config.seed} | "
         f"lr_embed {train_config.lr_embed:.6g} | "
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "
         f"wd_muon {train_config.wd_muon:.6g} | "
-        f"total distinct params {model.total_param_size:,} | "
-        f"embed distinct params {model.embed_param_size:,} | "
-        f"block distinct params {model.block_param_size:,}"
+        f"total distinct params {raw_model.total_param_size:,} | "
+        f"embed distinct params {raw_model.embed_param_size:,} | "
+        f"block distinct params {raw_model.block_param_size:,}",
+        rank=rank,
     )
 
     try:
         for epoch_idx in range(train_config.epoch):
+            microbatches_this_epoch = 0
             # Batch iterator re-initializes at each epoch with a different random shuffle
             for input_ids, targets, cu_seqlens, position_ids in batch_iterator(
                 parquet_path,
@@ -175,7 +182,12 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                 max_sl=train_config.sequence_len,
                 device=device,
                 seed=train_config.seed + epoch_idx,
+                rank=rank,
+                world_size=world_size,
             ):
+                if microbatches_this_epoch >= microbatches_per_epoch:
+                    break
+                microbatches_this_epoch += 1
                 # Cast to bf16 for fast training with A100 and H100s .
                 # Varlen-attn doesn't support anything else, so no need to change this really. 
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -214,9 +226,9 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                         now = time.time()
                         first_step_time = now - start_time
                         if train_config.torch_compile != "false":
-                            print(f"Compile time: {first_step_time:.2f}s")
+                            print0(f"Compile time: {first_step_time:.2f}s", rank=rank)
                         else:
-                            print(f"First step time: {first_step_time:.2f}s")
+                            print0(f"First step time: {first_step_time:.2f}s", rank=rank)
                         start_time = now
                         last_step_time = now
                         if profiler is not None and not profiler_started:
@@ -224,7 +236,8 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
                             profiler_started = True
                     else:
                         now = time.time()
-                        last_step_time = report_step(now, epoch_idx, step, total_steps, accum_loss, accum_lb_loss, train_config, scheduler, last_step_time, start_time, wandb_run)
+                        if rank == 0:
+                            last_step_time = report_step(now, epoch_idx, step, total_steps, accum_loss, accum_lb_loss, train_config, scheduler, last_step_time, start_time, wandb_run, world_size=world_size)
 
                         if profiler_started:
                             profiler.step()
@@ -240,14 +253,15 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False):
         if profiler_started:
             profiler.__exit__(None, None, None)
             sort_key = "cuda_time_total" if str(device).startswith("cuda") and torch.cuda.is_available() else "self_cpu_time_total"
-            print(
+            print0(
                 profiler.key_averages().table(
                     sort_by=sort_key,
                     row_limit=30,
-                )
+                ),
+                rank=rank,
             )
 
-    if save:
+    if save and rank == 0:
         save_model(model, train_config.run_name) 
     if wandb_run is not None:
         wandb_run.finish()
@@ -303,7 +317,8 @@ def get_linear_schedule_with_warmup(
 def save_model(model, run_name: str | None):
     # Saves weights and model config directly. 
     # Can be converted to a hf model later with a wrapper using convert_hf.py (Dirty implementation for now)
-    raw_model = model._orig_mod if hasattr(model, "_orig_mod") else model # For compile
+    raw_model = model.module if hasattr(model, "module") else model # For DDP
+    raw_model = raw_model._orig_mod if hasattr(raw_model, "_orig_mod") else raw_model # For compile
     if run_name:
         filename = f"{run_name}.pth"
     else:
@@ -332,6 +347,7 @@ def report_step(
     last_step_time: float,
     start_time: float,
     wandb_run,
+    world_size: int = 1,
 ) -> float:
     avg_loss = accum_loss / train_config.grad_acc
     avg_lb_loss = accum_lb_loss / train_config.grad_acc
@@ -339,8 +355,8 @@ def report_step(
     avg_step_time = (now - start_time) / (step - 1)
     remaining = avg_step_time * (total_steps - step)
     lr_embed, lr_block = scheduler.get_last_lr()
-    tok_per_s = (train_config.microbatch_tok * train_config.grad_acc) / step_time
-    tokens_processed = step * train_config.microbatch_tok * train_config.grad_acc
+    tok_per_s = (train_config.microbatch_tok * train_config.grad_acc * world_size) / step_time
+    tokens_processed = step * train_config.microbatch_tok * train_config.grad_acc * world_size
     print(
         f"Epoch {epoch_idx + 1}/{train_config.epoch} "
         f"Step {step}/{total_steps} training loss: {avg_loss:.4f} "

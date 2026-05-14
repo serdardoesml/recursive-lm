@@ -16,6 +16,9 @@ python -m scripts.train_tokenizer --dataset climbmix100Mwords.txt
 Tokenize data with:
 python -m scripts.tokenize_data --dataset climbmix100Mwords.txt --tokenizer climbmix100Mwords_tokenizer.pkl
 
+Subdivide tokenized data into 10%, 25%, and 50% subsets with:
+python -m scripts.subdivide_dataset --dataset climbmix100Mwords.parquet
+
 Train model with:
 python -m scripts.train_model --dataset climbmix100Mwords.parquet
 

@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from recursive_lm.common import get_base_dir, print_banner
+from recursive_lm.common import compute_cleanup, compute_init, get_base_dir, print_banner
 from recursive_lm.model import ModelConfig
 from recursive_lm.training import TrainingConfig, train
 
@@ -49,8 +49,6 @@ parser.add_argument("--torch_compile", type=str, choices=["true", "false", "max-
 # Limits step count to 100 and disables saving.
 parser.add_argument("--profile", type=str, choices=["true", "false"], default="false")
 
-print_banner()
-
 args = parser.parse_args()
 
 model_config = ModelConfig(
@@ -94,4 +92,19 @@ train_config = TrainingConfig(
 )
 
 parquet_path = os.path.join(get_base_dir(), "data", "tokenized", args.dataset)
-train(train_config, parquet_path, device="cuda", save=args.save == "true")
+ddp, rank, local_rank, world_size, device = compute_init(device_type="cuda")
+if rank == 0:
+    print_banner()
+try:
+    train(
+        train_config,
+        parquet_path,
+        device=device,
+        save=args.save == "true",
+        ddp=ddp,
+        rank=rank,
+        local_rank=local_rank,
+        world_size=world_size,
+    )
+finally:
+    compute_cleanup()
