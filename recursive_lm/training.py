@@ -32,7 +32,7 @@ class TrainingConfig:
     wd_muon: float = 0.1
     lb_coef: float = 0.004
 
-    microbatch_tok: int = 32768
+    microbatch_tok: int = 32768 # Per GPU. Global batch size is microbatch_tok * world_size * grad_acc
     grad_acc: int = 1 # There seems to be increasing evidence that accumulating gradients is never actually optimal. Keeping it for reproducability.
     sequence_len: int = 256 # Only for training, does not change model itself.
 
