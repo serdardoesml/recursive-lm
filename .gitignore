@@ -9,6 +9,7 @@ eval_bundle/
 data/*
 analysis/*
 models/*
+figures/
 evals/data/*
 evals/logs/*
 slurm/
