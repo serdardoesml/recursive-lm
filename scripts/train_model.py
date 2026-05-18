@@ -39,6 +39,7 @@ parser.add_argument("--top_k", type=int, default=ModelConfig.top_k)
 parser.add_argument("--n_mlp_intermediate", type=int, default=ModelConfig.n_mlp_intermediate)
 parser.add_argument("--rec_depth", type=int, default=ModelConfig.rec_depth)
 parser.add_argument("--std_depth", type=int, default=ModelConfig.std_depth)
+parser.add_argument("--share_rec_norms", type=str, choices=["true", "false"], default="false")
 parser.add_argument("--tie_embed", type=str, choices=["true", "false"], default=ModelConfig.tie_embed)
 parser.add_argument("--save", type=str, choices=["true", "false"], default="true")
 
@@ -62,6 +63,7 @@ model_config = ModelConfig(
     n_mlp_intermediate=args.n_mlp_intermediate,
     rec_depth=args.rec_depth,
     std_depth=args.std_depth,
+    share_rec_norms=args.share_rec_norms == "true",
     tie_embed=args.tie_embed == "true",
 )
 

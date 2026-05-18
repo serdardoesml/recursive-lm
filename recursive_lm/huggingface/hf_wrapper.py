@@ -38,6 +38,7 @@ class RecursiveLMConfig(PretrainedConfig):
         n_mlp_intermediate: int = ModelConfig.n_mlp_intermediate,
         std_depth: int = ModelConfig.std_depth,
         rec_depth: int = ModelConfig.rec_depth,
+        share_rec_norms: bool = ModelConfig.share_rec_norms,
         tie_embed: bool = ModelConfig.tie_embed,
         rope_cache_len: int = ModelConfig.rope_cache_len,
         **kwargs,
@@ -64,6 +65,7 @@ class RecursiveLMConfig(PretrainedConfig):
         self.n_mlp_intermediate = n_mlp_intermediate
         self.std_depth = std_depth
         self.rec_depth = rec_depth
+        self.share_rec_norms = share_rec_norms
         self.tie_embed = tie_embed
         self.rope_cache_len = rope_cache_len
         self.auto_map = auto_map
@@ -86,6 +88,7 @@ class RecursiveLMConfig(PretrainedConfig):
             n_mlp_intermediate=self.n_mlp_intermediate,
             std_depth=self.std_depth,
             rec_depth=self.rec_depth,
+            share_rec_norms=self.share_rec_norms,
             tie_embed=self.tie_embed,
             rope_cache_len=self.rope_cache_len,
         )

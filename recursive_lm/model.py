@@ -18,6 +18,7 @@ class ModelConfig:
     n_mlp_intermediate: int = 8192
     std_depth: int = 0
     rec_depth: int = 24
+    share_rec_norms: bool = False # For ablations
     tie_embed: bool = False # Tied embeddings greatly hurt performance on recursive mode
     rope_cache_len: int = 2048
 
@@ -87,13 +88,15 @@ class RecursiveBlocks(nn.Module):
     def __init__(self, config: ModelConfig, cos_cache, sin_cache):
         super().__init__()
         self.depth = config.rec_depth
+        self.share_norms = config.share_rec_norms
         self.moe = config.moe
 
         # Independent norms for each depth. Recursive blocks use post-norm bias
         # on attn/mlp norms as depth-specific conditioning.
-        self.attn_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_hidden, use_bias=True) for _ in range(self.depth)])
-        self.mlp_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_hidden, use_bias=True) for _ in range(self.depth)])
-        self.qk_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_headdim) for _ in range(self.depth)])
+        norm_count = 1 if self.share_norms else self.depth
+        self.attn_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_hidden, use_bias=True) for _ in range(norm_count)])
+        self.mlp_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_hidden, use_bias=True) for _ in range(norm_count)])
+        self.qk_norms = nn.ModuleList([RMSNormWithOptionalBias(config.n_headdim) for _ in range(norm_count)])
 
         if self.moe:
             # Independent routers for each depth
@@ -107,10 +110,11 @@ class RecursiveBlocks(nn.Module):
 
     def forward(self, x, cu_seqlens, max_seqlen, position_ids):
         for i in range(self.depth):
+            norm_idx = 0 if self.share_norms else i
             if self.moe:
-                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i], self.routers[i])
+                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[norm_idx], self.mlp_norms[norm_idx], self.qk_norms[norm_idx], self.routers[i])
             else:
-                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[i], self.mlp_norms[i], self.qk_norms[i])
+                x = self.recursive_block(x, cu_seqlens, max_seqlen, position_ids, self.attn_norms[norm_idx], self.mlp_norms[norm_idx], self.qk_norms[norm_idx])
         return x
     
     def get_param_groups(self):
