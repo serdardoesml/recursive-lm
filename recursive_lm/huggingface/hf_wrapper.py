@@ -67,7 +67,7 @@ class RecursiveLMConfig(PretrainedConfig):
         self.rec_depth = rec_depth
         self.share_rec_norms = share_rec_norms
         self.tie_embed = tie_embed
-        self.rope_cache_len = rope_cache_len
+        self.rope_cache_len = max(rope_cache_len, ModelConfig.rope_cache_len)
         self.auto_map = auto_map
         self.tie_word_embeddings = tie_embed
         self.hidden_size = self.n_hidden
