@@ -24,9 +24,10 @@ import time
 class TrainingConfig:
     model_config: ModelConfig
 
-    # Set a negative value for random. Used for initialization and dataset shuffling.
-    # Note: For data shuffling, each epoch will use previous epoch seed + 1.
+    # Set a negative value for random initialization seed.
     seed: int = -1
+    # Data row-group shuffle seed. Each epoch uses data_seed + epoch_idx.
+    data_seed: int = 0
 
     lr_embed: float = 0.007
     lr_block: float = 0.02 # Muon requires higher learning rate.
@@ -164,6 +165,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False, ddp=Fa
         f"tokens_per_step {train_config.microbatch_tok * train_config.grad_acc * world_size} | "
         f"torch_compile {train_config.torch_compile} | "
         f"seed {train_config.seed} | "
+        f"data_seed {train_config.data_seed} | "
         f"lr_embed {train_config.lr_embed:.6g} | "
         f"lr_block {train_config.lr_block:.6g} | "
         f"wd_adam {train_config.wd_adam:.6g} | "
@@ -184,7 +186,7 @@ def train(train_config: TrainingConfig, parquet_path, device, save=False, ddp=Fa
                     tokens_per_batch=train_config.microbatch_tok,
                     max_sl=train_config.sequence_len,
                     device=device,
-                    seed=train_config.seed + epoch_idx,
+                    seed=train_config.data_seed + epoch_idx,
                     rank=rank,
                     world_size=world_size,
                 ):
